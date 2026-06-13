@@ -10,6 +10,7 @@ This repository is a monorepo with two parts:
 |-----------|------------|-------|
 | [`agent/`](./agent) | Diana's "brain" — the realtime voice/text agent | Python · [LiveKit Agents](https://docs.livekit.io/agents/) · LiveKit Inference |
 | [`web/`](./web) | The web app you use to talk to Diana | TypeScript · Next.js · [LiveKit React components](https://docs.livekit.io/frontends/) |
+| [`mobile/`](./mobile) | Cross-platform mobile app (Android now, iOS later) | Dart · [Flutter](https://flutter.dev/) · [LiveKit Flutter SDK](https://github.com/livekit/client-sdk-flutter) |
 
 The split is intentional: the **agent is the product** and stays the same across
 every surface. Today there's a web frontend; Android and iOS are just additional
@@ -79,6 +80,22 @@ pnpm dev
 Open http://localhost:3000 and click **Talk to Diana**. The frontend dispatches
 to the agent by name (`diana`), so the agent process must be running.
 
+### 3. (Optional) Run on your phone
+
+The [`mobile/`](./mobile) Flutter app runs Diana on Android and iOS. Because a
+mobile app can't safely embed your API secret, it gets tokens from LiveKit
+Cloud's **token server** instead of the credentials directly:
+
+1. In LiveKit Cloud → **Settings → Token server**, toggle it on and copy the
+   **sandbox ID**.
+2. `cd mobile && cp .env.example .env` and paste the sandbox ID into
+   `LIVEKIT_SANDBOX_ID`.
+3. `flutter pub get`, connect your phone (USB debugging on), then `flutter run`.
+
+The agent must be running (step 1) and pointed at the **same** LiveKit Cloud
+project. The phone connects through Cloud, so it doesn't need to reach your
+laptop directly. Full details in [`mobile/README.md`](./mobile/README.md).
+
 ## Tests
 
 Diana's behavior is covered by the LiveKit Agents
@@ -93,18 +110,21 @@ uv run pytest
 
 ## Project status
 
-✅ **Milestone: the interface works** — voice + text conversation with Diana
-through the web app, on a foundation built for growth.
+✅ **Web interface works** — voice + text conversation with Diana through the
+web app.
+✅ **Mobile app scaffolded** — Flutter app (`mobile/`) for Android + iOS,
+dispatching to the same `diana` agent.
 
 Planned next:
 
 - **Long-term memory** so Diana remembers across sessions, not just within one
 - **Research / tools** (web access and other resources) exposed as agent tools
-- **Mobile** Android and iOS frontends against the same agent
+- Polish the mobile UX and ship a real iOS build
 
 ## Credits
 
 Bootstrapped from LiveKit's official
-[`agent-starter-python`](https://github.com/livekit-examples/agent-starter-python)
-and [`agent-starter-react`](https://github.com/livekit-examples/agent-starter-react)
+[`agent-starter-python`](https://github.com/livekit-examples/agent-starter-python),
+[`agent-starter-react`](https://github.com/livekit-examples/agent-starter-react),
+and [`agent-starter-flutter`](https://github.com/livekit-examples/agent-starter-flutter)
 starters, then customized for Diana.
