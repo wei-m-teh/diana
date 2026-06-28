@@ -83,18 +83,19 @@ to the agent by name (`diana`), so the agent process must be running.
 ### 3. (Optional) Run on your phone
 
 The [`mobile/`](./mobile) Flutter app runs Diana on Android and iOS. Because a
-mobile app can't safely embed your API secret, it gets tokens from LiveKit
-Cloud's **token server** instead of the credentials directly:
+mobile app can't safely embed your API secret, it fetches a token from a token
+endpoint — and the **web app already serves one** at `/api/token` (which
+dispatches `diana`). So for local testing, the phone reuses the web app:
 
-1. In LiveKit Cloud → **Settings → Token server**, toggle it on and copy the
-   **sandbox ID**.
-2. `cd mobile && cp .env.example .env` and paste the sandbox ID into
-   `LIVEKIT_SANDBOX_ID`.
+1. Run the **agent** (step 1) and the **web app** with
+   `pnpm dev --hostname 0.0.0.0` (so the phone can reach it over your LAN).
+2. `cd mobile && cp .env.example .env`, then set
+   `LIVEKIT_TOKEN_ENDPOINT=http://<your-laptop-LAN-ip>:3000/api/token`.
 3. `flutter pub get`, connect your phone (USB debugging on), then `flutter run`.
 
-The agent must be running (step 1) and pointed at the **same** LiveKit Cloud
-project. The phone connects through Cloud, so it doesn't need to reach your
-laptop directly. Full details in [`mobile/README.md`](./mobile/README.md).
+Phone and laptop must be on the **same Wi-Fi**, all pointed at the same LiveKit
+Cloud project. Only the token fetch hits your laptop; audio/video flows through
+Cloud. Full details in [`mobile/README.md`](./mobile/README.md).
 
 ## Tests
 

@@ -51,9 +51,27 @@ class AppCtrl extends ChangeNotifier {
       );
     }
 
+    // Preferred for local development: fetch tokens from your own token
+    // endpoint. The web app already exposes one at /api/token that dispatches
+    // the "diana" agent. Set LIVEKIT_TOKEN_ENDPOINT in .env to that URL, e.g.
+    // http://<your-laptop-LAN-ip>:3000/api/token
+    final tokenEndpoint = dotenv.env['LIVEKIT_TOKEN_ENDPOINT']?.trim();
+    if (tokenEndpoint != null && tokenEndpoint.isNotEmpty) {
+      return sdk.Session.withAgent(
+        agentName,
+        tokenSource: sdk.EndpointTokenSource(url: Uri.parse(tokenEndpoint)).cached(),
+        options: sdk.SessionOptions(room: room),
+      );
+    }
+
+    // Fallback: LiveKit Cloud token server (sandbox), if enabled for your
+    // project. (Sandbox is deprecated and unavailable on newer projects.)
     final sandboxId = dotenv.env['LIVEKIT_SANDBOX_ID']?.replaceAll('"', '');
     if (sandboxId == null || sandboxId.isEmpty) {
-      throw StateError('LIVEKIT_SANDBOX_ID is not set and no hardcoded token is configured.');
+      throw StateError(
+        'Set LIVEKIT_TOKEN_ENDPOINT (recommended) or LIVEKIT_SANDBOX_ID in .env, '
+        'or configure a hardcoded token above.',
+      );
     }
 
     // Use the token server (sandbox) to fetch credentials, and explicitly

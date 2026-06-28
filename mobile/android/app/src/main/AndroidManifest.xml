@@ -2,7 +2,8 @@
     <application
         android:label="Diana"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"><!-- dev only: allows the local http://<laptop-ip>:3000/api/token fetch. Remove for production (use an https token endpoint). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
