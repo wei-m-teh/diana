@@ -15,6 +15,8 @@ from livekit.agents import (
 from livekit.plugins import ai_coustics, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
+from voices import voice_from_metadata
+
 logger = logging.getLogger("diana")
 
 load_dotenv(".env.local")
@@ -130,14 +132,23 @@ async def diana_session(ctx: JobContext):
         "room": ctx.room.name,
     }
 
+    # Resolve the per-user voice from the agent dispatch metadata that the token
+    # service set (JSON like '{"voice": "thalia"}'). Unknown/missing values fall
+    # back to the default, so a session never breaks on bad metadata.
+    # NOTE: confirm `ctx.job.metadata` against the installed SDK; read defensively.
+    raw_metadata = getattr(getattr(ctx, "job", None), "metadata", None)
+    selected_voice = voice_from_metadata(raw_metadata)
+    logger.info("session voice: %s (%s/%s)", selected_voice.key, selected_voice.model, selected_voice.voice)
+
     # STT -> LLM -> TTS voice pipeline, all powered by LiveKit Inference.
     # Text input/output is enabled by default, so the same session handles both
     # spoken and typed conversation.
     session = AgentSession(
         # Speech-to-text: the user's voice into text. https://docs.livekit.io/agents/models/stt/
         stt=inference.STT(model="deepgram/nova-3", language="multi"),
-        # Text-to-speech: Diana's replies into speech. https://docs.livekit.io/agents/models/tts/
-        tts=inference.TTS(model="deepgram/aura-2", voice="delia"),
+        # Text-to-speech: Diana's replies into speech, using the user's chosen voice.
+        # https://docs.livekit.io/agents/models/tts/
+        tts=inference.TTS(model=selected_voice.model, voice=selected_voice.voice),
         # Turn detection + VAD decide when the user is done speaking, which is
         # what keeps the conversation feeling fluid and continuous.
         # https://docs.livekit.io/agents/build/turns
