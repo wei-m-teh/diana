@@ -137,9 +137,7 @@ async def diana_session(ctx: JobContext):
         # Speech-to-text: the user's voice into text. https://docs.livekit.io/agents/models/stt/
         stt=inference.STT(model="deepgram/nova-3", language="multi"),
         # Text-to-speech: Diana's replies into speech. https://docs.livekit.io/agents/models/tts/
-        tts=inference.TTS(
-            model="elevenlabs/eleven_v3", voice="21m00Tcm4TlvDq8ikWAM"
-        ),
+        tts=inference.TTS(model="deepgram/aura-2", voice="thalia"),
         # Turn detection + VAD decide when the user is done speaking, which is
         # what keeps the conversation feeling fluid and continuous.
         # https://docs.livekit.io/agents/build/turns
