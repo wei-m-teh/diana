@@ -32,3 +32,5 @@ doc/api/
 
 .idea/
 *.iml
+# Flutter-generated macOS plugin registrant (regenerated on build)
+macos/Flutter/GeneratedPluginRegistrant.swift
