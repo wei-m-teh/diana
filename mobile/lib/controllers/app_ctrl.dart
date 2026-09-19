@@ -1,0 +1,212 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:livekit_client/livekit_client.dart' as sdk;
+import 'package:livekit_components/livekit_components.dart' as components;
+import 'package:logging/logging.dart';
+import 'package:uuid/uuid.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+enum AppScreenState { welcome, agent }
+
+enum AgentScreenState { visualizer, transcription }
+
+class AppCtrl extends ChangeNotifier {
+  static const uuid = Uuid();
+  static final _logger = Logger('AppCtrl');
+
+  // States
+  AppScreenState appScreenState = AppScreenState.welcome;
+  AgentScreenState agentScreenState = AgentScreenState.visualizer;
+
+  //Test
+  bool isUserCameEnabled = false;
+  bool isScreenshareEnabled = false;
+
+  final messageCtrl = TextEditingController();
+  final messageFocusNode = FocusNode();
+
+  late final sdk.Room room = sdk.Room(roomOptions: const sdk.RoomOptions(enableVisualizer: true));
+  late final roomContext = components.RoomContext(room: room);
+  late final sdk.Session session = _createSession(room: room);
+
+  // Diana registers as a *named* agent ("diana"), so the app must explicitly
+  // request that agent when fetching a token. This must match AGENT_NAME in the
+  // agent (see ../../agent/src/agent.py).
+  static const agentName = 'diana';
+
+  static sdk.Session _createSession({required sdk.Room room}) {
+    // Development-only hardcoded credentials (optional).
+    const hardcodedServerUrl = null; // e.g. 'wss://your-host'
+    const hardcodedToken = null; // e.g. 'eyJ...'
+
+    if (hardcodedServerUrl != null && hardcodedToken != null) {
+      return sdk.Session.fromFixedTokenSource(
+        sdk.LiteralTokenSource(
+          serverUrl: hardcodedServerUrl,
+          participantToken: hardcodedToken,
+        ),
+        options: sdk.SessionOptions(room: room),
+      );
+    }
+
+    // Preferred for local development: fetch tokens from your own token
+    // endpoint. The web app already exposes one at /api/token that dispatches
+    // the "diana" agent. Set LIVEKIT_TOKEN_ENDPOINT in .env to that URL, e.g.
+    // http://<your-laptop-LAN-ip>:3000/api/token
+    final tokenEndpoint = dotenv.env['LIVEKIT_TOKEN_ENDPOINT']?.trim();
+    if (tokenEndpoint != null && tokenEndpoint.isNotEmpty) {
+      return sdk.Session.withAgent(
+        agentName,
+        tokenSource: sdk.EndpointTokenSource(url: Uri.parse(tokenEndpoint)).cached(),
+        options: sdk.SessionOptions(room: room),
+      );
+    }
+
+    // Fallback: LiveKit Cloud token server (sandbox), if enabled for your
+    // project. (Sandbox is deprecated and unavailable on newer projects.)
+    final sandboxId = dotenv.env['LIVEKIT_SANDBOX_ID']?.replaceAll('"', '');
+    if (sandboxId == null || sandboxId.isEmpty) {
+      throw StateError(
+        'Set LIVEKIT_TOKEN_ENDPOINT (recommended) or LIVEKIT_SANDBOX_ID in .env, '
+        'or configure a hardcoded token above.',
+      );
+    }
+
+    // Use the token server (sandbox) to fetch credentials, and explicitly
+    // dispatch the "diana" agent via the token request.
+    return sdk.Session.withAgent(
+      agentName,
+      tokenSource: sdk.SandboxTokenSource(sandboxId: sandboxId).cached(),
+      options: sdk.SessionOptions(room: room),
+    );
+  }
+
+  bool isSendButtonEnabled = false;
+  bool isSessionStarting = false;
+  bool _hasCleanedUp = false;
+
+  AppCtrl() {
+    final format = DateFormat('HH:mm:ss');
+    // configure logs for debugging
+    Logger.root.level = Level.FINE;
+    Logger.root.onRecord.listen((record) {
+      debugPrint('${format.format(record.time)}: ${record.message}');
+    });
+
+    messageCtrl.addListener(() {
+      final newValue = messageCtrl.text.isNotEmpty;
+      if (newValue != isSendButtonEnabled) {
+        isSendButtonEnabled = newValue;
+        notifyListeners();
+      }
+    });
+
+    session.addListener(_handleSessionChange);
+  }
+
+  Future<void> cleanUp() async {
+    if (_hasCleanedUp) return;
+    _hasCleanedUp = true;
+
+    session.removeListener(_handleSessionChange);
+    await session.dispose();
+    await room.dispose();
+    roomContext.dispose();
+    messageCtrl.dispose();
+    messageFocusNode.dispose();
+  }
+
+  @override
+  void dispose() {
+    unawaited(cleanUp());
+    super.dispose();
+  }
+
+  void sendMessage() async {
+    isSendButtonEnabled = false;
+
+    final text = messageCtrl.text;
+    messageCtrl.clear();
+    notifyListeners();
+
+    if (text.isEmpty) return;
+    await session.sendText(text);
+  }
+
+  void toggleUserCamera(components.MediaDeviceContext? deviceCtx) {
+    isUserCameEnabled = !isUserCameEnabled;
+    isUserCameEnabled ? deviceCtx?.enableCamera() : deviceCtx?.disableCamera();
+    notifyListeners();
+  }
+
+  void toggleScreenShare() {
+    isScreenshareEnabled = !isScreenshareEnabled;
+    notifyListeners();
+  }
+
+  void toggleAgentScreenMode() {
+    agentScreenState =
+        agentScreenState == AgentScreenState.visualizer ? AgentScreenState.transcription : AgentScreenState.visualizer;
+    notifyListeners();
+  }
+
+  void connect() async {
+    if (isSessionStarting) {
+      _logger.fine('Connection attempt ignored: session already starting.');
+      return;
+    }
+
+    _logger.info('Starting session connection…');
+    isSessionStarting = true;
+    notifyListeners();
+
+    try {
+      await session.start();
+      if (session.connectionState == sdk.ConnectionState.connected) {
+        appScreenState = AppScreenState.agent;
+        notifyListeners();
+      }
+    } catch (error, stackTrace) {
+      _logger.severe('Connection error: $error', error, stackTrace);
+      appScreenState = AppScreenState.welcome;
+      notifyListeners();
+    } finally {
+      if (isSessionStarting) {
+        isSessionStarting = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<void> disconnect() async {
+    await session.end();
+    session.restoreMessageHistory(const []);
+    appScreenState = AppScreenState.welcome;
+    agentScreenState = AgentScreenState.visualizer;
+    notifyListeners();
+  }
+
+  void _handleSessionChange() {
+    final sdk.ConnectionState state = session.connectionState;
+    AppScreenState? nextScreen;
+    switch (state) {
+      case sdk.ConnectionState.connected:
+      case sdk.ConnectionState.reconnecting:
+        nextScreen = AppScreenState.agent;
+        break;
+      case sdk.ConnectionState.disconnected:
+        nextScreen = AppScreenState.welcome;
+        break;
+      case sdk.ConnectionState.connecting:
+        nextScreen = null;
+        break;
+    }
+
+    if (nextScreen != null && nextScreen != appScreenState) {
+      appScreenState = nextScreen;
+      notifyListeners();
+    }
+  }
+}
