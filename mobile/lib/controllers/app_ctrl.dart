@@ -8,6 +8,8 @@ import 'package:logging/logging.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import '../services/cognito_auth.dart';
+
 enum AppScreenState { welcome, agent }
 
 enum AgentScreenState { visualizer, transcription }
@@ -37,48 +39,17 @@ class AppCtrl extends ChangeNotifier {
   static const agentName = 'diana';
 
   static sdk.Session _createSession({required sdk.Room room}) {
-    // Development-only hardcoded credentials (optional).
-    const hardcodedServerUrl = null; // e.g. 'wss://your-host'
-    const hardcodedToken = null; // e.g. 'eyJ...'
-
-    if (hardcodedServerUrl != null && hardcodedToken != null) {
-      return sdk.Session.fromFixedTokenSource(
-        sdk.LiteralTokenSource(
-          serverUrl: hardcodedServerUrl,
-          participantToken: hardcodedToken,
-        ),
-        options: sdk.SessionOptions(room: room),
-      );
-    }
-
-    // Preferred for local development: fetch tokens from your own token
-    // endpoint. The web app already exposes one at /api/token that dispatches
-    // the "diana" agent. Set LIVEKIT_TOKEN_ENDPOINT in .env to that URL, e.g.
-    // http://<your-laptop-LAN-ip>:3000/api/token
-    final tokenEndpoint = dotenv.env['LIVEKIT_TOKEN_ENDPOINT']?.trim();
-    if (tokenEndpoint != null && tokenEndpoint.isNotEmpty) {
-      return sdk.Session.withAgent(
-        agentName,
-        tokenSource: sdk.EndpointTokenSource(url: Uri.parse(tokenEndpoint)).cached(),
-        options: sdk.SessionOptions(room: room),
-      );
-    }
-
-    // Fallback: LiveKit Cloud token server (sandbox), if enabled for your
-    // project. (Sandbox is deprecated and unavailable on newer projects.)
-    final sandboxId = dotenv.env['LIVEKIT_SANDBOX_ID']?.replaceAll('"', '');
-    if (sandboxId == null || sandboxId.isEmpty) {
-      throw StateError(
-        'Set LIVEKIT_TOKEN_ENDPOINT (recommended) or LIVEKIT_SANDBOX_ID in .env, '
-        'or configure a hardcoded token above.',
-      );
-    }
-
-    // Use the token server (sandbox) to fetch credentials, and explicitly
-    // dispatch the "diana" agent via the token request.
+    final endpoint = dotenv.env['LIVEKIT_TOKEN_ENDPOINT']?.trim() ?? '';
     return sdk.Session.withAgent(
       agentName,
-      tokenSource: sdk.SandboxTokenSource(sandboxId: sandboxId).cached(),
+      tokenSource: sdk.CustomTokenSource((options) async {
+        if (!endpoint.startsWith('https://')) throw StateError('An HTTPS session endpoint is required');
+        final token = await cognitoAuth.accessToken();
+        return sdk.EndpointTokenSource(
+          url: Uri.parse(endpoint),
+          headers: {'Authorization': 'Bearer $token'},
+        ).fetch(options);
+      }),
       options: sdk.SessionOptions(room: room),
     );
   }
@@ -90,7 +61,7 @@ class AppCtrl extends ChangeNotifier {
   AppCtrl() {
     final format = DateFormat('HH:mm:ss');
     // configure logs for debugging
-    Logger.root.level = Level.FINE;
+    Logger.root.level = Level.WARNING;
     Logger.root.onRecord.listen((record) {
       debugPrint('${format.format(record.time)}: ${record.message}');
     });

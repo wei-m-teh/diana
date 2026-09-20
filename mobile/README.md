@@ -1,101 +1,62 @@
-# Diana — mobile (Flutter)
+# Diana mobile (Flutter)
 
-A cross-platform [Flutter](https://flutter.dev/) frontend for Diana that runs on
-**Android, iOS**, web, and desktop from one codebase. Built on the
-[LiveKit Flutter SDK](https://github.com/livekit/client-sdk-flutter) and the
-[agent-starter-flutter](https://github.com/livekit-examples/agent-starter-flutter)
-template, customized for Diana.
+The Android and iOS clients sign in through Amazon Cognito using authorization
+code + PKCE. An authenticated request to API Gateway returns a room-scoped
+LiveKit token; voice and text then travel through LiveKit Cloud to the Diana
+agent on ECS Fargate. No laptop token server is needed.
 
-It supports voice and text, transcriptions, and (optionally) camera/screen video
-input. It explicitly dispatches the **`diana`** named agent, matching the
-backend in [`../agent`](../agent).
+## Configuration
 
-## How it connects (important)
+The bundled .env contains only these public values, taken from CDK outputs:
 
-A mobile app must **not** embed your `LIVEKIT_API_SECRET`. Instead it fetches a
-short-lived token from a **token endpoint**, then connects to LiveKit Cloud
-using that token. The token request carries the `diana` agent name, so LiveKit
-dispatches the agent into the room.
-
-**Recommended for local dev: reuse the web app's token endpoint.** The web app
-(`../web`) already serves `POST /api/token` and dispatches `diana`. Point the
-mobile app at it with `LIVEKIT_TOKEN_ENDPOINT`. Only the *token fetch* goes to
-your laptop; the actual audio/video flows through LiveKit Cloud.
-
-```
-phone (Flutter app)
-   │  1. POST /api/token  (over your LAN, to the web app on your laptop)
-   ▼
-laptop web app (../web)  ──mints token w/ "diana" dispatch──▶ returns token
-   │
-   │  2. connect with token
-   ▼
-LiveKit Cloud (room)  ◀──registers "diana"── agent (../agent, on your laptop)
+```dotenv
+LIVEKIT_TOKEN_ENDPOINT=https://your-api.execute-api.us-east-1.amazonaws.com/sessions
+COGNITO_ISSUER=https://cognito-idp.us-east-1.amazonaws.com/your-pool
+COGNITO_DOMAIN=https://your-domain.auth.us-east-1.amazoncognito.com
+COGNITO_CLIENT_ID=your-mobile-client-id
 ```
 
-So three things run during testing: the **agent**, the **web app** (used here
-only as the token endpoint), and the **mobile app** — all pointed at the same
-LiveKit Cloud project, with the phone and laptop on the same Wi-Fi.
+Never bundle LiveKit API secrets, AWS credentials, passwords or user tokens.
+Self-registration is disabled; an administrator creates the Cognito account.
+The Android and iOS callback scheme is com.diana.app. Registered redirects are
+com.diana.app:/oauth2redirect and com.diana.app:/signout.
 
-> Alternative: LiveKit Cloud's **token server** (a *sandbox ID*) avoids needing
-> the web app, but the sandbox feature is deprecated and unavailable on newer
-> projects. If yours has it, set `LIVEKIT_SANDBOX_ID` instead. See `.env.example`.
+Access tokens stay in memory. Refresh tokens use platform secure storage.
+The app refreshes before starting a new conversation if necessary. Signing out
+clears local tokens, attempts refresh-token revocation and opens Cognito logout.
+API Gateway requires an access token with diana/sessions.create; there is no
+anonymous endpoint fallback.
 
-## Prerequisites
-
-- [Flutter SDK](https://docs.flutter.dev/get-started/install) (run `flutter doctor`)
-- For Android: Android Studio + an Android device or emulator
-- For iOS (later): Xcode on a Mac
-- The **agent** running and registered as `diana` (see [`../agent`](../agent))
-- The **web app** running (see [`../web`](../web)) — used as the token endpoint
-- Your phone and laptop on the **same Wi-Fi**, and your laptop's **LAN IP**
-
-## Setup
+## Build and validate
 
 ```bash
-cd mobile
-cp .env.example .env
-# Edit .env → set LIVEKIT_TOKEN_ENDPOINT to http://<your-laptop-LAN-ip>:3000/api/token
-# Find your IP: macOS `ipconfig getifaddr en0`, Linux `hostname -I`
 flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release --target-platform android-arm64
 ```
 
-## Run on a device
+On this EC2 host, source ../.build-tools/env.sh first to use the installed Flutter,
+Android SDK and Java toolchains. The APK is build/app/outputs/flutter-apk/app-release.apk.
+It uses the repository's development signing configuration and is a test build,
+not a store release. Rebuild after changing .env.
 
-You need **three** things running, all on the same LiveKit Cloud project:
+iOS builds require macOS and Apple signing. The callback URL scheme and Keychain
+entitlements are configured, but an iOS binary has not been built or tested on EC2. Android can be built on EC2 and
+installed on a phone or AWS Device Farm device. See
+[Device Farm testing](devicefarm/README.md) for the test runner.
 
-1. **Agent** — in `../agent`: `uv run python src/agent.py dev`
-2. **Web app** (token endpoint) — in `../web`: `pnpm dev --hostname 0.0.0.0`
-   (the `--hostname 0.0.0.0` makes it reachable from your phone over the LAN)
-3. **Mobile app**:
-   - Connect your phone (USB debugging on) or start an emulator.
-   - Confirm it's detected: `flutter devices`
-   - Run: `flutter run` (pick your phone if prompted)
+See [AWS infrastructure](../infra/README.md) for deployment and account setup.
 
-Then tap **Talk to Diana**, grant microphone permission, and talk or type.
+## Installing the Android test build on a phone
 
-### Build an installable APK (Android)
+Open the temporary APK download link in Chrome on the phone. Open the downloaded
+Diana.apk, allow Chrome to install apps from this source if Android prompts, and
+tap Install. Launch Diana, choose Sign in, then Google, and grant microphone
+access when starting a conversation. Internet access is required; the phone
+does not need to share a network with the EC2 instance.
 
-```bash
-flutter build apk --release
-# output: build/app/outputs/flutter-apk/app-release.apk
-```
-Transfer that APK to your phone and install it (allow "install from unknown
-sources"), or install directly over USB:
-```bash
-flutter install
-```
-
-## Configuration notes
-
-- The agent name (`diana`) is set in `lib/controllers/app_ctrl.dart`. It must
-  match the agent's `AGENT_NAME`.
-- For a hardcoded token instead of the sandbox (quick one-off testing), see the
-  `hardcodedServerUrl` / `hardcodedToken` constants in the same file.
-- For production, replace the sandbox token source with your own token endpoint
-  (`EndpointTokenSource`). See
-  [token generation](https://docs.livekit.io/home/server/generating-tokens/).
-- App display name is set via `android:label` in
-  `android/app/src/main/AndroidManifest.xml`. The Android `applicationId` is
-  still the template default (`com.livekit.example.VoiceAssistantFlutter`);
-  rename it before any real release.
+The current APK is ARM64 and uses the project's development signing key.
+Download links last at most one hour and can be regenerated. CDK manages a
+separate private MobileDownloads bucket with public access blocked and a
+one-day object expiration rule. No public bucket or Lambda policy is used.

@@ -44,7 +44,7 @@ interface RootLayoutProps {
 }
 
 export default async function RootLayout({ children }: RootLayoutProps) {
-  const hdrs = await headers();
+  const hdrs = process.env.DIANA_STATIC_EXPORT === '1' ? new Headers() : await headers();
   const appConfig = await getAppConfig(hdrs);
   const styles = getStyles(appConfig);
   const { pageTitle, pageDescription, companyName, logo, logoDark } = appConfig;

@@ -26,6 +26,7 @@ class ControlBar extends StatelessWidget {
                 fit: FlexFit.tight,
                 child: components.MediaDeviceContextBuilder(
                   builder: (context, roomCtx, mediaDeviceCtx) => FloatingGlassButton(
+                    semanticLabel: mediaDeviceCtx.microphoneOpened ? 'Mute microphone' : 'Unmute microphone',
                     sfIcon: mediaDeviceCtx.microphoneOpened
                         ? sf.SFIcons.sf_microphone_fill
                         : sf.SFIcons.sf_microphone_slash_fill,
@@ -56,6 +57,7 @@ class ControlBar extends StatelessWidget {
                 fit: FlexFit.tight,
                 child: components.MediaDeviceContextBuilder(
                   builder: (context, roomCtx, mediaDeviceCtx) => FloatingGlassButton(
+                    semanticLabel: mediaDeviceCtx.cameraOpened ? 'Turn camera off' : 'Turn camera on',
                     sfIcon: mediaDeviceCtx.cameraOpened ? sf.SFIcons.sf_video_fill : sf.SFIcons.sf_video_slash_fill,
                     onTap: () => appCtrl.toggleUserCamera(mediaDeviceCtx),
                   ),
@@ -65,6 +67,7 @@ class ControlBar extends StatelessWidget {
                 flex: 1,
                 fit: FlexFit.tight,
                 child: FloatingGlassButton(
+                  semanticLabel: 'Share screen',
                   sfIcon: sf.SFIcons.sf_arrow_up_square_fill,
                   // onTap: () => appCtrl.toggleScreenShare(),
                 ),
@@ -75,6 +78,8 @@ class ControlBar extends StatelessWidget {
                   flex: 1,
                   fit: FlexFit.tight,
                   child: FloatingGlassButton(
+                    semanticLabel:
+                        agentScreenState == AgentScreenState.transcription ? 'Hide transcript' : 'Show transcript',
                     isActive: agentScreenState == AgentScreenState.transcription,
                     sfIcon: sf.SFIcons.sf_ellipsis_message_fill,
                     onTap: () => ctx.read<AppCtrl>().toggleAgentScreenMode(),
@@ -85,6 +90,7 @@ class ControlBar extends StatelessWidget {
                 flex: 1,
                 fit: FlexFit.tight,
                 child: FloatingGlassButton(
+                  semanticLabel: 'End call',
                   iconColor: LKColorPaletteLight().fgModerate,
                   sfIcon: sf.SFIcons.sf_phone_down_fill,
                   onTap: () => ctx.read<AppCtrl>().disconnect(),

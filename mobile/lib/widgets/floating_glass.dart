@@ -30,6 +30,7 @@ class FloatingGlassView extends StatelessWidget {
 }
 
 class FloatingGlassButton extends StatelessWidget {
+  final String? semanticLabel;
   final IconData sfIcon;
   final GestureTapCallback? onTap;
   final Color? iconColor;
@@ -40,6 +41,7 @@ class FloatingGlassButton extends StatelessWidget {
 
   const FloatingGlassButton({
     super.key,
+    this.semanticLabel,
     required this.sfIcon,
     this.onTap,
     this.iconColor,
@@ -49,21 +51,25 @@ class FloatingGlassButton extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext ctx) => Material(
-        borderRadius: BorderRadius.circular(10),
-        clipBehavior: Clip.antiAlias,
-        type: MaterialType.transparency,
-        child: Ink(
-          color: isActive ? Theme.of(ctx).cardColor : null,
-          child: InkWell(
-            onTap: onTap,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                vertical: 10,
-                horizontal: 10,
+  Widget build(BuildContext ctx) => Semantics(
+        label: semanticLabel,
+        button: true,
+        child: Material(
+          borderRadius: BorderRadius.circular(10),
+          clipBehavior: Clip.antiAlias,
+          type: MaterialType.transparency,
+          child: Ink(
+            color: isActive ? Theme.of(ctx).cardColor : null,
+            child: InkWell(
+              onTap: onTap,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 10,
+                  horizontal: 10,
+                ),
+                alignment: Alignment.center,
+                child: _buildContent(ctx),
               ),
-              alignment: Alignment.center,
-              child: _buildContent(ctx),
             ),
           ),
         ),
@@ -76,6 +82,7 @@ class FloatingGlassButton extends StatelessWidget {
         children: [
           sf.SFIcon(
             sfIcon,
+            semanticsLabel: '',
             color: iconColor,
             fontSize: 20,
           ),
@@ -88,6 +95,7 @@ class FloatingGlassButton extends StatelessWidget {
       opacity: onTap == null ? 0.1 : 1.0,
       child: sf.SFIcon(
         sfIcon,
+        semanticsLabel: '',
         color: iconColor,
         fontSize: 20,
       ),

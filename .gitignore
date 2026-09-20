@@ -19,3 +19,6 @@ node_modules/
 .next/
 out/
 *.tsbuildinfo
+
+# Local mobile build toolchains and caches
+.build-tools/

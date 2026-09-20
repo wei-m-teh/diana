@@ -22,6 +22,8 @@ void main() {
 
     // Build our app and trigger a frame.
     await tester.pumpWidget(const VoiceAssistantApp());
+    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('Talk to Diana'), findsNothing);
     // Dispose resources started by the global controller to avoid pending timers.
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() async {

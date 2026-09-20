@@ -1,0 +1,5 @@
+cdk.out/
+outputs.json
+.env
+.env.*
+!.env.example

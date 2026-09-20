@@ -1,0 +1,26 @@
+version: 0.1
+android_test_host: amazon_linux_2
+phases:
+  install:
+    commands:
+      - devicefarm-cli use node 22
+      - devicefarm-cli use appium 2
+      - devicefarm-cli use python 3.12
+      - devicefarm-cli use java 17
+      - cd "$DEVICEFARM_TEST_PACKAGE_PATH"
+      - python -m pip install --no-index --find-links=wheelhouse -r requirements.txt
+  pre_test:
+    commands:
+      - appium --base-path= --log-level warn --log-timestamp --log-no-colors > "$DEVICEFARM_LOG_DIR/appium.log" 2>&1 &
+      - |-
+        for attempt in $(seq 1 60); do
+          curl --silent --fail http://127.0.0.1:4723/status && break
+          sleep 1
+        done
+        curl --silent --fail http://127.0.0.1:4723/status
+  test:
+    commands:
+      - cd "$DEVICEFARM_TEST_PACKAGE_PATH"
+      - python -m pytest tests -v --junitxml="$DEVICEFARM_LOG_DIR/results.xml"
+artifacts:
+  - $DEVICEFARM_LOG_DIR

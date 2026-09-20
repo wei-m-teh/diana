@@ -52,6 +52,10 @@ access to X") attach to the agent as **tools**, not as forked logic.
 
 ## Quick start
 
+For AWS deployment with **CDK, S3/CloudFront, Cognito, API Gateway, Lambda, and
+ECS Fargate**, see [`infra/README.md`](./infra/README.md). Sign-in is required;
+Supabase is not used. The instructions below run the app locally.
+
 You need **two processes running**: the agent and the web app. Both read the
 same LiveKit credentials.
 

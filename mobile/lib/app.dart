@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'controllers/app_ctrl.dart';
 import 'screens/agent_screen.dart';
+import 'screens/sign_in_gate.dart';
 import 'screens/welcome_screen.dart';
 import 'ui/color_pallette.dart' show LKColorPaletteLight, LKColorPaletteDark;
 import 'widgets/app_layout_switcher.dart';
@@ -67,11 +68,12 @@ class VoiceAssistantApp extends StatelessWidget {
         child: components.SessionContext(
           session: appCtrl.session,
           child: MaterialApp(
-            title: 'Voice Assistant',
+            title: 'Diana',
             theme: buildTheme(isLight: true),
             darkTheme: buildTheme(isLight: false),
             // themeMode: ThemeMode.dark,
-            home: Builder(
+            home: SignInGate(
+                child: Builder(
               builder: (ctx) => Center(
                 child: Container(
                   constraints: BoxConstraints(maxWidth: 620),
@@ -90,7 +92,7 @@ class VoiceAssistantApp extends StatelessWidget {
                   ),
                 ),
               ),
-            ),
+            )),
           ),
         ),
       );

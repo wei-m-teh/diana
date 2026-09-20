@@ -22,6 +22,12 @@ analyzer:
     use_super_parameters: ignore
     avoid_print: ignore
     deprecated_member_use_from_same_package: ignore
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - macos/**
 
 linter:
   rules:

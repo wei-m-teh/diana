@@ -4,6 +4,8 @@ import 'package:livekit_client/livekit_client.dart' as sdk;
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart' show launchUrl;
 import '../controllers/app_ctrl.dart' as ctrl;
+import '../services/cognito_auth.dart';
+import 'profile_screen.dart';
 import '../widgets/button.dart' as buttons;
 
 class WelcomeScreen extends StatelessWidget {
@@ -18,6 +20,18 @@ class WelcomeScreen extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               spacing: 30,
               children: [
+                Wrap(alignment: WrapAlignment.center, spacing: 12, children: [
+                  TextButton(
+                      onPressed: () =>
+                          Navigator.of(ctx).push(MaterialPageRoute<void>(builder: (_) => const ProfileScreen())),
+                      child: const Text('Profile / Settings')),
+                  TextButton(
+                      onPressed: () async {
+                        await ctx.read<ctrl.AppCtrl>().disconnect();
+                        await cognitoAuth.signOut();
+                      },
+                      child: const Text('Sign out')),
+                ]),
                 Image.asset(
                   'assets/terminal.png',
                   width: 80,
@@ -29,7 +43,8 @@ class WelcomeScreen extends StatelessWidget {
                   TextSpan(
                     children: [
                       const TextSpan(
-                        text: 'Talk or type to chat with Diana, your personal companion. Need help getting set up? Check out the ',
+                        text:
+                            'Talk or type to chat with Diana, your personal companion. Need help getting set up? Check out the ',
                       ),
                       TextSpan(
                         text: 'Voice AI quickstart',

@@ -14,23 +14,29 @@ class MessageBarButton extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext ctx) => ClipOval(
-        child: Material(
-          color: isEnabled ? Theme.of(ctx).buttonTheme.colorScheme?.surface : LKColorPaletteDark().bg3,
-          child: InkWell(
-            onTap: isEnabled ? onTap : null,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                vertical: 10,
-                horizontal: 10,
-              ),
-              width: 40,
-              height: 40,
-              alignment: Alignment.center,
-              child: const sf.SFIcon(
-                sf.SFIcons.sf_arrow_up,
-                color: Colors.white,
-                fontSize: 16,
+  Widget build(BuildContext ctx) => Semantics(
+        label: 'Send message',
+        button: true,
+        enabled: isEnabled,
+        child: ClipOval(
+          child: Material(
+            color: isEnabled ? Theme.of(ctx).buttonTheme.colorScheme?.surface : LKColorPaletteDark().bg3,
+            child: InkWell(
+              onTap: isEnabled ? onTap : null,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  vertical: 10,
+                  horizontal: 10,
+                ),
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                child: const sf.SFIcon(
+                  sf.SFIcons.sf_arrow_up,
+                  semanticsLabel: '',
+                  color: Colors.white,
+                  fontSize: 16,
+                ),
               ),
             ),
           ),
