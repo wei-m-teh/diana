@@ -74,3 +74,27 @@ keys. The intended rerun is one Pixel 8 job with a ten-minute timeout.
 The APK is ready for testing. A successful two-turn mobile conversation has not
 yet been demonstrated. Acoustic microphone/speaker quality, Bluetooth,
 background/lock-screen behavior, iOS, and app-store distribution are untested.
+
+## Android screen-off support — 2026-09-26, build 16
+
+- Added a microphone/media-playback foreground service, ongoing notification with
+  an End action, and a partial CPU wake lock scoped to the active conversation.
+  Starting a call requests permissions while the activity is visible; ending or
+  failing a call releases the service. The screen is allowed to sleep.
+- Flutter analysis passed without issues; all 11 Flutter tests passed.
+- Built the arm64 release APK, version 1.0.0+16, using the existing signing key.
+- [Successful Samsung Galaxy S25 / Android 16 Device Farm run](https://us-west-2.console.aws.amazon.com/devicefarm/home?region=us-west-2#/mobile/projects/55056a85-807c-4902-ba8e-a9cab50e5473/runs/53ee721d-a1f5-469c-a31e-896f86f5320a).
+  The automated test confirmed the device slept for 45 seconds while the
+  foreground service, partial wake lock, and app process remained active. A
+  second conversation turn succeeded after unlocking. Both the in-app End
+  control and notification End action stopped the service.
+- An initial test run failed because the Samsung keyboard obscured Cognito's
+  Sign in button. The automation now hides the keyboard before submitting.
+- Temporary Cognito test account, profile, credential-bearing Device Farm
+  uploads, and local credential ZIP were deleted after testing.
+- Artifacts: `mobile/build/devicefarm/background-16/`. Private installation
+  artifacts are in the existing mobile-download bucket under `android/build-16/`
+  and carry `application=conversation-agent` object tags.
+- This verifies background lifecycle and conversation continuity, not audible
+  microphone/speaker operation during sleep or Bluetooth earbud routing. A
+  Galaxy Fold 7 with the user's earbuds still needs a hands-on check.

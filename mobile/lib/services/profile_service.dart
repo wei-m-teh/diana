@@ -16,13 +16,25 @@ const profileVoices = {
 
 class UserProfile {
   final String email, displayName, voiceKey, planId, status;
+  final String? timezone;
+  final String locationMode;
+  final String? locationCity;
+  final Map<String, dynamic>? lastKnownLocation;
   const UserProfile(
-      {required this.email,
+      {this.timezone,
+      this.locationMode = 'off',
+      this.locationCity,
+      this.lastKnownLocation,
+      required this.email,
       required this.displayName,
       required this.voiceKey,
       required this.planId,
       required this.status});
   factory UserProfile.fromJson(Map<String, dynamic> value) => UserProfile(
+        timezone: value['preferences']['timezone'] as String?,
+        locationMode: value['preferences']['location']?['mode'] as String? ?? 'off',
+        locationCity: value['preferences']['location']?['city'] as String?,
+        lastKnownLocation: value['lastKnownLocation'] as Map<String, dynamic>?,
         email: value['email'] as String,
         displayName: value['displayName'] as String,
         voiceKey: value['preferences']['voiceKey'] as String,
@@ -41,9 +53,9 @@ class ProfileService {
   final String? _endpoint;
 
   Future<UserProfile> load() => _request();
-  Future<UserProfile> update(Map<String, String> patch) => _request(patch);
+  Future<UserProfile> update(Map<String, dynamic> patch) => _request(patch);
 
-  Future<UserProfile> _request([Map<String, String>? patch]) async {
+  Future<UserProfile> _request([Map<String, dynamic>? patch]) async {
     final session = Uri.parse(_endpoint ?? dotenv.env['LIVEKIT_TOKEN_ENDPOINT'] ?? '');
     if (session.scheme != 'https' || !session.path.endsWith('/sessions')) {
       throw Exception('Profile settings are not configured.');

@@ -9,9 +9,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:voice_assistant/app.dart';
+import 'package:voice_assistant/services/background_call.dart';
 
 void main() {
   testWidgets('App builds successfully', (WidgetTester tester) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(BackgroundCall.channel, (_) async => null);
     await dotenv.load(
       fileName: '.env',
       isOptional: true,

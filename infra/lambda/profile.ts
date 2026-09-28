@@ -1,3 +1,6 @@
+import { validLocationPreference } from "../../web/lib/location";
+import { validTimezone } from "../../web/lib/timezone";
+import { isPersonality } from "../../web/lib/personality";
 import type { APIGatewayProxyEventV2WithJWTAuthorizer } from "aws-lambda";
 import { authenticatedUser } from "./auth";
 import { profileStore, type ProfilePatch } from "./profile-store";
@@ -11,7 +14,7 @@ function parsePatch(event: APIGatewayProxyEventV2WithJWTAuthorizer): ProfilePatc
   const value = JSON.parse(body);
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid body");
   const keys = Object.keys(value);
-  if (!keys.length || keys.some(key => !["displayName", "voiceKey"].includes(key))) throw new Error("invalid fields");
+  if (!keys.length || keys.some(key => !["displayName", "voiceKey", "personality", "timezone", "location"].includes(key))) throw new Error("invalid fields");
   const patch: ProfilePatch = {};
   if (Object.hasOwn(value, "displayName")) {
     if (typeof value.displayName !== "string" || value.displayName.length > 100 || /[\u0000-\u001f\u007f]/u.test(value.displayName)) throw new Error("invalid name");
@@ -21,10 +24,22 @@ function parsePatch(event: APIGatewayProxyEventV2WithJWTAuthorizer): ProfilePatc
     if (typeof value.voiceKey !== "string" || !VOICES.some(voice => voice.key === value.voiceKey)) throw new Error("invalid voice");
     patch.voiceKey = value.voiceKey;
   }
+  if (Object.hasOwn(value, "personality")) {
+    if (!isPersonality(value.personality)) throw new Error("invalid personality");
+    patch.personality = value.personality;
+  }
+  if (Object.hasOwn(value, "timezone")) {
+    if (value.timezone !== null && !validTimezone(value.timezone)) throw new Error("invalid timezone");
+    patch.timezone = value.timezone;
+  }
+  if (Object.hasOwn(value, "location")) {
+    if (!validLocationPreference(value.location)) throw new Error("invalid location preference");
+    patch.location = value.location.mode === "manual" ? { mode: "manual", city: value.location.city.trim() } : value.location;
+  }
   return patch;
 }
 
-export function createProfileHandler(store = profileStore) {
+export function createProfileHandler(store: Pick<typeof profileStore, "ensure" | "update"> = profileStore) {
   return async (event: APIGatewayProxyEventV2WithJWTAuthorizer) => {
     const headers = { "Content-Type": "application/json", "Cache-Control": "no-store" };
     const reply = (statusCode: number, body: unknown) => ({ statusCode, headers, body: JSON.stringify(body) });
@@ -36,7 +51,7 @@ export function createProfileHandler(store = profileStore) {
     let patch: ProfilePatch | undefined;
     if (method === "PATCH") {
       try { patch = parsePatch(event); }
-      catch { return reply(400, { error: "invalid_profile_update", message: "Provide displayName (up to 100 characters) and/or a valid voiceKey." }); }
+      catch { return reply(400, { error: "invalid_profile_update", message: "Provide displayName (up to 100 characters) , a valid voiceKey, all five personality traits as integers from 0 to 100, and/or an IANA timezone (null for device timezone)." }); }
     }
     try {
       return reply(200, patch ? await store.update(user, patch) : await store.ensure(user));

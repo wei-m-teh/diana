@@ -1,22 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { type AgentState } from '@livekit/components-react';
-
-function generateConnectingSequenceBar(columns: number): number[][] {
-  const seq = [];
-
-  for (let x = 0; x < columns; x++) {
-    seq.push([x, columns - 1 - x]);
-  }
-
-  return seq;
-}
-
-function generateListeningSequenceBar(columns: number): number[][] {
-  const center = Math.floor(columns / 2);
-  const noIndex = -1;
-
-  return [[center], [noIndex]];
-}
 
 export function useAgentAudioVisualizerBarAnimator(
   state: AgentState | undefined,
@@ -24,47 +7,18 @@ export function useAgentAudioVisualizerBarAnimator(
   interval: number
 ): number[] {
   const [index, setIndex] = useState(0);
-  const [sequence, setSequence] = useState<number[][]>([[]]);
-
+  const connecting = state === 'connecting' || state === 'initializing';
   useEffect(() => {
-    if (state === 'thinking') {
-      setSequence(generateListeningSequenceBar(columns));
-    } else if (state === 'connecting' || state === 'initializing') {
-      const sequence = [...generateConnectingSequenceBar(columns)];
-      setSequence(sequence);
-    } else if (state === 'listening') {
-      setSequence(generateListeningSequenceBar(columns));
-    } else if (state === undefined || state === 'speaking') {
-      setSequence([new Array(columns).fill(0).map((_, idx) => idx)]);
-    } else {
-      setSequence([[]]);
-    }
+    if (!connecting) return;
     setIndex(0);
-  }, [state, columns]);
+    const timer = window.setInterval(() => setIndex((value) => value + 1), interval);
+    return () => window.clearInterval(timer);
+  }, [connecting, interval, columns]);
 
-  const animationFrameId = useRef<number | null>(null);
-  useEffect(() => {
-    let startTime = performance.now();
-
-    const animate = (time: DOMHighResTimeStamp) => {
-      const timeElapsed = time - startTime;
-
-      if (timeElapsed >= interval) {
-        setIndex((prev) => prev + 1);
-        startTime = time;
-      }
-
-      animationFrameId.current = requestAnimationFrame(animate);
-    };
-
-    animationFrameId.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (animationFrameId.current !== null) {
-        cancelAnimationFrame(animationFrameId.current);
-      }
-    };
-  }, [interval, columns, state, sequence.length]);
-
-  return sequence[index % sequence.length] ?? [];
+  if (columns < 1) return [];
+  if (connecting) return [index % columns, columns - 1 - (index % columns)];
+  // Keep brightness steady throughout a conversation. Previously thinking and
+  // listening alternated a large bar on/off every 150/500 ms, causing flashes.
+  // Speaking is still represented by the smoothly changing audio-band heights.
+  return Array.from({ length: columns }, (_, i) => i);
 }

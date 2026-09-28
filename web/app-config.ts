@@ -39,7 +39,7 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
 
   supportsChatInput: true,
   supportsVideoInput: true,
-  supportsScreenShare: true,
+  supportsScreenShare: false,
   isPreConnectBufferEnabled: true,
 
   logo: '/lk-logo.svg',

@@ -21,11 +21,15 @@ function WelcomeImage() {
 interface WelcomeViewProps {
   startButtonText: string;
   onStartCall: () => void;
+  starting?: boolean;
+  startError?: string;
 }
 
 export const WelcomeView = ({
   startButtonText,
   onStartCall,
+  starting = false,
+  startError,
   ref,
 }: React.ComponentProps<'div'> & WelcomeViewProps) => {
   return (
@@ -40,10 +44,16 @@ export const WelcomeView = ({
         <Button
           size="lg"
           onClick={onStartCall}
+          disabled={starting}
           className="mt-6 w-64 rounded-full font-mono text-xs font-bold tracking-wider uppercase"
         >
-          {startButtonText}
+          {starting ? 'Connecting…' : startButtonText}
         </Button>
+        {startError && (
+          <p role="alert" className="mt-3 text-sm">
+            {startError}
+          </p>
+        )}
       </section>
 
       <div className="fixed bottom-5 left-0 flex w-full items-center justify-center">

@@ -1,11 +1,12 @@
 import { Room } from 'livekit-client';
 import {
-  RoomAudioRenderer,
   type RoomAudioRendererProps,
   SessionProvider,
   type SessionProviderProps,
   type UseSessionReturn,
 } from '@livekit/components-react';
+import { ConversationContext } from '@/components/app/conversation-context';
+import { AudioRecoveryProvider, ResilientAudioRenderer } from './resilient-audio';
 
 /**
  * Props for the AgentSessionProvider component.
@@ -54,8 +55,12 @@ export function AgentSessionProvider({
 }: AgentSessionProviderProps) {
   return (
     <SessionProvider session={session}>
-      {children}
-      <RoomAudioRenderer {...roomAudioRendererProps} />
+      <ConversationContext>
+        <AudioRecoveryProvider>
+          {children}
+          <ResilientAudioRenderer {...roomAudioRendererProps} />
+        </AudioRecoveryProvider>
+      </ConversationContext>
     </SessionProvider>
   );
 }

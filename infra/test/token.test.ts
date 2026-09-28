@@ -87,3 +87,22 @@ test("rejects missing, expired, wrong-client, wrong-issuer and unscoped authoriz
   delete (request.requestContext as any).authorizer;
   assert.equal((await guard(request)).statusCode,403);
 });
+
+
+test("both clients receive device timezone; saved override cannot be replaced by request", async () => {
+  for (const client of ["web-client", "mobile-client"]) {
+    const request = event("POST", "/sessions", JSON.stringify({ deviceTimezone: "Asia/Tokyo", timezone: "malicious" }));
+    request.requestContext.authorizer.jwt.claims.client_id = client;
+    const read = (response: any) => {
+      const jwt = JSON.parse(response.body).participantToken;
+      const token = JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString());
+      const metadata = JSON.parse(token.roomConfig.agents[0].metadata);
+      assert.equal(metadata.participantIdentity, token.sub);
+      return metadata.timezone;
+    };
+    assert.deepEqual(read(await handler(request)), { mode: "device", name: "Asia/Tokyo" });
+    const manual = createHandler(async () => credentials, async () => ({ preferences: { timezone: "Europe/Paris" } } as any));
+    assert.deepEqual(read(await manual(request)), { mode: "manual", name: "Europe/Paris" });
+  }
+  assert.equal((await handler(event("POST", "/sessions", JSON.stringify({ deviceTimezone: "bad" })))).statusCode, 400);
+});

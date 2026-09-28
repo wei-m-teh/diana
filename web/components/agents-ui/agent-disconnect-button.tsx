@@ -1,10 +1,11 @@
 'use client';
 
-import { type ComponentProps } from 'react';
+import { type ComponentProps, useRef, useState } from 'react';
 import { type VariantProps } from 'class-variance-authority';
 import { PhoneOffIcon } from 'lucide-react';
 import { useSessionContext } from '@livekit/components-react';
 import { Button, buttonVariants } from '@/components/ui/button';
+import { recordSessionDiagnostic } from '@/lib/session-diagnostics';
 import { cn } from '@/lib/shadcn/utils';
 
 /**
@@ -16,6 +17,8 @@ export interface AgentDisconnectButtonProps
    * Custom icon to display. Defaults to PhoneOffIcon.
    */
   icon?: React.ReactNode;
+  /** Optional navigation after the session has disconnected. */
+  onDisconnected?: () => void | Promise<void>;
   /**
    * The size of the button.
    * @default 'default'
@@ -53,18 +56,41 @@ export function AgentDisconnectButton({
   variant = 'destructive',
   children,
   onClick,
+  onDisconnected,
+  disabled,
   ...props
 }: AgentDisconnectButtonProps) {
   const { end } = useSessionContext();
-  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+  const endingRef = useRef(false);
+  const [ending, setEnding] = useState(false);
+  const handleClick = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (endingRef.current) return;
+    recordSessionDiagnostic('end-clicked');
+    endingRef.current = true;
+    setEnding(true);
     onClick?.(event);
-    if (typeof end === 'function') {
-      end();
+    try {
+      await end();
+    } catch {
+      // A page reset also releases media if graceful disconnection fails.
+    } finally {
+      if (onDisconnected) {
+        await onDisconnected();
+      } else {
+        endingRef.current = false;
+        setEnding(false);
+      }
     }
   };
 
   return (
-    <Button size={size} variant={variant} onClick={handleClick} {...props}>
+    <Button
+      size={size}
+      variant={variant}
+      onClick={handleClick}
+      disabled={disabled || ending}
+      {...props}
+    >
       {icon ?? <PhoneOffIcon />}
       {children ?? <span className={cn(size?.includes('icon') && 'sr-only')}>END CALL</span>}
     </Button>

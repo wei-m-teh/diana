@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/profile_service.dart';
+import '../services/device_timezone.dart';
+import '../services/device_location.dart';
+import '../widgets/location_settings.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key, this.service});
@@ -12,12 +15,23 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   late final _service = widget.service ?? ProfileService();
   final _name = TextEditingController();
+  final _timezone = TextEditingController();
+  String _locationMode = 'off', _locationCity = '';
+  String? _locationStatus;
+  bool _checkingLocation = false;
+  bool _automaticTimezone = true;
   final _form = GlobalKey<FormState>();
   UserProfile? _profile;
   String _voice = 'delia';
   bool _loading = true, _saving = false, _saved = false;
   String? _error;
-  bool get _dirty => _profile != null && (_name.text.trim() != _profile!.displayName || _voice != _profile!.voiceKey);
+  bool get _dirty =>
+      _profile != null &&
+      (_name.text.trim() != _profile!.displayName ||
+          _voice != _profile!.voiceKey ||
+          _locationMode != _profile!.locationMode ||
+          (_locationMode == 'manual' && _locationCity.trim() != _profile!.locationCity) ||
+          (_automaticTimezone ? null : _timezone.text.trim()) != _profile!.timezone);
 
   @override
   void initState() {
@@ -28,6 +42,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _name.dispose();
+    _timezone.dispose();
     super.dispose();
   }
 
@@ -38,11 +53,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
     try {
       final value = await _service.load();
+      final zone = await DeviceTimezone.current();
       if (!mounted) return;
       setState(() {
         _profile = value;
+        _locationMode = value.locationMode;
+        _locationCity = value.locationCity ?? '';
         _name.text = value.displayName;
         _voice = value.voiceKey;
+        _automaticTimezone = value.timezone == null;
+        _timezone.text = value.timezone ?? zone ?? 'UTC';
       });
     } catch (_) {
       if (mounted) {
@@ -67,15 +87,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _saved = false;
     });
     try {
-      final patch = <String, String>{};
+      if (!_automaticTimezone && !await DeviceTimezone.isValid(_timezone.text.trim())) {
+        if (mounted) {
+          setState(() {
+            _error = 'Enter an IANA timezone such as America/New_York.';
+          });
+        }
+        return;
+      }
+      final patch = <String, dynamic>{};
+      if (_locationMode != _profile!.locationMode ||
+          (_locationMode == 'manual' && _locationCity.trim() != _profile!.locationCity)) {
+        patch['location'] = {'mode': _locationMode, if (_locationMode == 'manual') 'city': _locationCity.trim()};
+      }
+      if ((_automaticTimezone ? null : _timezone.text.trim()) != _profile!.timezone) {
+        patch['timezone'] = _automaticTimezone ? null : _timezone.text.trim();
+      }
       if (_name.text.trim() != _profile!.displayName) patch['displayName'] = _name.text.trim();
       if (_voice != _profile!.voiceKey) patch['voiceKey'] = _voice;
       final value = await _service.update(patch);
       if (!mounted) return;
       setState(() {
         _profile = value;
+        _locationMode = value.locationMode;
+        _locationCity = value.locationCity ?? '';
         _name.text = value.displayName;
         _voice = value.voiceKey;
+        _automaticTimezone = value.timezone == null;
+        _timezone.text = value.timezone ?? 'UTC';
         _saved = true;
       });
     } catch (_) {
@@ -108,8 +147,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ));
       if (discard != true || !mounted) return;
       setState(() {
+        _locationMode = _profile!.locationMode;
+        _locationCity = _profile!.locationCity ?? '';
         _name.text = _profile!.displayName;
         _voice = _profile!.voiceKey;
+        _automaticTimezone = _profile!.timezone == null;
+        _timezone.text = _profile!.timezone ?? 'UTC';
       });
       // Let PopScope accept the navigation after discarding changes.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -190,11 +233,62 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       'This saves your preference. Changing Diana’s speaking voice is not available yet.',
                                       style: TextStyle(fontSize: 14)),
                                   const SizedBox(height: 24),
+                                  SwitchListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: const Text('Use device timezone'),
+                                    subtitle: const Text(
+                                        'Each device follows its local timezone. Manual settings apply to web and Android on the next conversation.'),
+                                    value: _automaticTimezone,
+                                    onChanged: _saving
+                                        ? null
+                                        : (value) => setState(() {
+                                              _automaticTimezone = value;
+                                              _saved = false;
+                                            }),
+                                  ),
+                                  if (!_automaticTimezone)
+                                    TextFormField(
+                                      controller: _timezone,
+                                      enabled: !_saving,
+                                      decoration:
+                                          const InputDecoration(labelText: 'Timezone', hintText: 'America/New_York'),
+                                      onChanged: (_) => setState(() {
+                                        _saved = false;
+                                      }),
+                                    ),
+                                  const SizedBox(height: 24),
+                                  LocationSettings(
+                                    mode: _locationMode,
+                                    city: _locationCity,
+                                    disabled: _saving || _checkingLocation,
+                                    status: _locationStatus,
+                                    lastKnown: _profile!.lastKnownLocation,
+                                    onChanged: (mode, city) => setState(() {
+                                      _locationMode = mode;
+                                      _locationCity = city;
+                                      _saved = false;
+                                    }),
+                                    onCheck: () async {
+                                      setState(() {
+                                        _checkingLocation = true;
+                                        _locationStatus = 'Checking this device’s location…';
+                                      });
+                                      final fix = await DeviceLocation.current(requestPermission: true);
+                                      if (!mounted) return;
+                                      setState(() {
+                                        _checkingLocation = false;
+                                        _locationStatus = fix != null
+                                            ? 'Location access works. Save changes to use it for future conversations.'
+                                            : 'Location unavailable. Allow Location in Android app settings and turn on device location. Diana can use a saved location or a manual city.';
+                                      });
+                                    },
+                                  ),
+                                  const SizedBox(height: 24),
                                   const Text('Plan', style: TextStyle(fontWeight: FontWeight.bold)),
                                   Text('${_profile!.planId} · ${_profile!.status}'),
                                   const SizedBox(height: 24),
                                   FilledButton(
-                                      onPressed: _saving || !_dirty ? null : _save,
+                                      onPressed: _saving || _checkingLocation || !_dirty ? null : _save,
                                       child: Text(_saving ? 'Saving…' : 'Save changes')),
                                   if (_error != null)
                                     Padding(

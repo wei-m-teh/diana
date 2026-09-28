@@ -1,15 +1,26 @@
 import { accessToken, authentication } from '@/lib/cognito-auth';
+import type { Personality } from '@/lib/personality';
+import type { LocationPreference, SavedLocation } from './location';
 
 export interface UserProfile {
   email: string;
   displayName: string;
-  preferences: { voiceKey: string };
+  preferences: {
+    voiceKey: string;
+    personality?: Personality;
+    timezone?: string | null;
+    location?: LocationPreference;
+  };
+  lastKnownLocation?: SavedLocation | null;
   subscription: { planId: string; status: string };
 }
 
 export async function profileRequest(patch?: {
   displayName?: string;
   voiceKey?: string;
+  personality?: Personality;
+  timezone?: string | null;
+  location?: LocationPreference;
 }): Promise<UserProfile> {
   const { config } = await authentication();
   const token = await accessToken();

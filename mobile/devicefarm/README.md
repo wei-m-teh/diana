@@ -2,7 +2,13 @@
 
 Build the APK using mobile/README.md. The test signs into Cognito through the
 system browser, starts a call, mutes the microphone, exchanges two text turns
-with Diana, and disconnects. No physical phone or laptop is required.
+with Diana, and disconnects. Between turns it unmutes the microphone, locks the
+physical device for 45 seconds, verifies the foreground service and partial wake
+lock remain active, then unlocks and completes the second turn. It also checks
+service cleanup and the notification End action on a second call.
+
+This verifies Android lifecycle behavior, not acoustic quality or Bluetooth
+earbud routing. No local physical phone or laptop is required.
 
 Run from mobile with an EC2 instance role that can manage Device Farm:
 

@@ -18,6 +18,7 @@ import {
   useInputControls,
   usePublishPermissions,
 } from '@/hooks/agents-ui/use-agent-control-bar';
+import { signIn } from '@/lib/cognito-auth';
 import { cn } from '@/lib/shadcn/utils';
 
 const LK_TOGGLE_VARIANT_1 = [
@@ -389,6 +390,16 @@ export function AgentControlBar({
         {/* Disconnect */}
         {visibleControls.leave && (
           <AgentDisconnectButton
+            onDisconnected={async () => {
+              // A new document clears the browser audio state that survives a
+              // Room reset on some phones. Reuse Cognito's existing session,
+              // keeping application tokens in memory rather than persisting them.
+              if (process.env.NEXT_PUBLIC_DIANA_STATIC === '1') {
+                await signIn();
+              } else {
+                window.location.reload();
+              }
+            }}
             onClick={onDisconnect}
             disabled={!isConnected}
             className={cn(

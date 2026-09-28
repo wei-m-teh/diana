@@ -3,6 +3,7 @@ import { toast as sonnerToast } from 'sonner';
 import { useAgent, useSessionContext } from '@livekit/components-react';
 import { WarningIcon } from '@phosphor-icons/react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { recordSessionDiagnostic } from '@/lib/session-diagnostics';
 
 interface ToastProps {
   title: ReactNode;
@@ -30,6 +31,7 @@ export function useAgentErrors() {
 
   useEffect(() => {
     if (isConnected && agent.state === 'failed') {
+      recordSessionDiagnostic('agent-failed-auto-end');
       const reasons = agent.failureReasons;
 
       toastAlert({

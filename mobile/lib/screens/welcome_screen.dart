@@ -65,6 +65,10 @@ class WelcomeScreen extends StatelessWidget {
                     ],
                   ),
                 ),
+                Consumer<ctrl.AppCtrl>(
+                    builder: (ctx, app, _) => app.connectionError == null
+                        ? const SizedBox.shrink()
+                        : Text(app.connectionError!, style: const TextStyle(color: Colors.red))),
                 // Agent listening indicator
                 Consumer<sdk.Session>(
                   builder: (ctx, session, child) => AnimatedOpacity(

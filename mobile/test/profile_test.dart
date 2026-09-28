@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:voice_assistant/services/device_timezone.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -7,6 +8,15 @@ import 'package:voice_assistant/services/profile_service.dart';
 import 'package:voice_assistant/screens/profile_screen.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        DeviceTimezone.channel, (call) async => call.method == 'current' ? 'America/New_York' : true);
+  });
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(DeviceTimezone.channel, null);
+  });
   Map<String, dynamic> data() => {
         'email': 'test@example.com',
         'displayName': 'Alex',
@@ -57,18 +67,20 @@ void main() {
     expect(find.text('Alex'), findsOneWidget);
     await tester.enterText(find.byType(TextFormField), 'New name');
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byType(DropdownButtonFormField<String>));
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.ensureVisible(find.byType(DropdownButtonFormField<String>).first);
+    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Thalia — clear, upbeat').last);
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Save changes'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save changes'));
     await tester.pumpAndSettle();
     expect(find.text('Your changes could not be saved. Please try again.'), findsOneWidget);
     expect(find.text('New name'), findsOneWidget);
     failSave = false;
     await tester.ensureVisible(find.text('Save changes'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save changes'));
     await tester.pumpAndSettle();
     expect(find.text('Profile saved.'), findsOneWidget);
@@ -105,5 +117,52 @@ void main() {
     await tester.tap(find.text('Discard'));
     await tester.pumpAndSettle();
     expect(find.text('Open settings'), findsOneWidget);
+  });
+  testWidgets('manual location is saved and sharing can be turned off', (tester) async {
+    final profile = data();
+    final patches = <dynamic>[];
+    final api = service(MockClient((request) async {
+      if (request.method == 'PATCH') {
+        final patch = jsonDecode(request.body);
+        patches.add(patch);
+        profile['preferences'] = {...(profile['preferences'] as Map), 'location': patch['location']};
+      }
+      return http.Response(jsonEncode(profile), 200);
+    }));
+    await tester.pumpWidget(MaterialApp(home: ProfileScreen(service: api)));
+    await tester.pumpAndSettle();
+    final dropdown = find.byKey(const ValueKey('location-off'));
+    await tester.ensureVisible(dropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(dropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use a city I enter').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).last, 'Paris, France');
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    expect(patches.last, {
+      'location': {'mode': 'manual', 'city': 'Paris, France'}
+    });
+    expect(find.text('Profile saved.'), findsOneWidget);
+    final manual = find.byKey(const ValueKey('location-manual'));
+    await tester.ensureVisible(manual);
+    await tester.pumpAndSettle();
+    await tester.tap(manual);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Off — clear saved location').last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('location-off')), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save changes')).onPressed, isNotNull);
+    await tester.ensureVisible(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    expect(patches.last, {
+      'location': {'mode': 'off'}
+    });
   });
 }

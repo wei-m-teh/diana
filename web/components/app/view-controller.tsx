@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
 import { AnimatePresence, motion } from 'motion/react';
 import { useSessionContext } from '@livekit/components-react';
@@ -33,7 +34,29 @@ interface ViewControllerProps {
 }
 
 export function ViewController({ appConfig }: ViewControllerProps) {
-  const { isConnected, start } = useSessionContext();
+  const { isConnected, start, room } = useSessionContext();
+  const startingRef = useRef(false);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState('');
+
+  async function handleStartCall() {
+    if (startingRef.current) return;
+    startingRef.current = true;
+    setStarting(true);
+    setStartError('');
+    // End closes the room's audio context. Unlock its replacement directly in
+    // the click handler, before session.start awaits credentials or connection.
+    // If playback is still blocked, the existing Start Audio button offers retry.
+    void room.startAudio().catch(() => {});
+    try {
+      await start();
+    } catch {
+      setStartError('Unable to start the conversation. Please try again.');
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
+  }
   const { resolvedTheme } = useTheme();
 
   return (
@@ -44,7 +67,9 @@ export function ViewController({ appConfig }: ViewControllerProps) {
           key="welcome"
           {...VIEW_MOTION_PROPS}
           startButtonText={appConfig.startButtonText}
-          onStartCall={start}
+          onStartCall={handleStartCall}
+          starting={starting}
+          startError={startError}
         />
       )}
       {/* Session view */}

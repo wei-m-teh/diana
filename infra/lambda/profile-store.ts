@@ -1,3 +1,6 @@
+import { locationPreference, type LocationPreference, type SavedLocation } from "../../web/lib/location";
+import { validTimezone } from "../../web/lib/timezone";
+import { normalizePersonality, type Personality } from "../../web/lib/personality";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from "@aws-sdk/client-cognito-identity-provider";
@@ -9,13 +12,18 @@ export interface UserProfile {
   email: string;
   emailVerified: boolean;
   displayName: string;
-  preferences: { voiceKey: string };
+  preferences: { voiceKey: string; personality: Personality; timezone?: string | null; location?: LocationPreference };
+  lastKnownLocation?: SavedLocation | null;
   // Stored foundation only: billing and entitlement enforcement are separate work.
   subscription: { planId: "free"; status: "active" };
   createdAt: string;
   updatedAt: string;
 }
-export interface ProfilePatch { displayName?: string; voiceKey?: string }
+export interface ProfilePatch { displayName?: string; voiceKey?: string; personality?: Personality; timezone?: string | null; location?: LocationPreference }
+
+function normalize(profile: UserProfile): UserProfile {
+  return { ...profile, preferences: { ...profile.preferences, personality: normalizePersonality(profile.preferences?.personality), location: locationPreference(profile.preferences?.location), timezone: validTimezone(profile.preferences?.timezone) ? profile.preferences.timezone : null } };
+}
 
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const cognito = new CognitoIdentityProviderClient({});
@@ -39,7 +47,7 @@ export function createProfileStore(
     const result = await client.send(new GetCommand({
       TableName: table(), Key: { userId }, ConsistentRead: true,
     }));
-    return result.Item as UserProfile | undefined;
+    return result.Item ? normalize(result.Item as UserProfile) : undefined;
   }
   async function ensure(user: UserIdentity): Promise<UserProfile> {
     const existing = await read(user.sub);
@@ -48,7 +56,7 @@ export function createProfileStore(
     const now = new Date().toISOString();
     const profile: UserProfile = {
       userId: user.sub, schemaVersion: 1, ...attributes,
-      preferences: { voiceKey: "delia" }, subscription: { planId: "free", status: "active" },
+      preferences: { voiceKey: "delia", personality: normalizePersonality(undefined), timezone: null, location: { mode: "off" } }, subscription: { planId: "free", status: "active" },
       createdAt: now, updatedAt: now,
     };
     try {
@@ -67,7 +75,7 @@ export function createProfileStore(
   async function update(user: UserIdentity, patch: ProfilePatch): Promise<UserProfile> {
     await ensure(user);
     const names: Record<string, string> = { "#updated": "updatedAt" };
-    const values: Record<string, string> = { ":updated": new Date().toISOString() };
+    const values: Record<string, unknown> = { ":updated": new Date().toISOString() };
     const changes = ["#updated = :updated"];
     if (patch.displayName !== undefined) {
       names["#name"] = "displayName";
@@ -80,6 +88,30 @@ export function createProfileStore(
       values[":voice"] = patch.voiceKey;
       changes.push("#preferences.#voice = :voice");
     }
+    if (patch.personality !== undefined) {
+      names["#preferences"] = "preferences";
+      names["#personality"] = "personality";
+      values[":personality"] = patch.personality;
+      changes.push("#preferences.#personality = :personality");
+    }
+    if (patch.timezone !== undefined) {
+      names["#preferences"] = "preferences";
+      names["#timezone"] = "timezone";
+      values[":timezone"] = patch.timezone;
+      changes.push("#preferences.#timezone = :timezone");
+    }
+    if (patch.location !== undefined) {
+      names["#preferences"] = "preferences";
+      names["#location"] = "location";
+      values[":location"] = patch.location;
+      changes.push("#preferences.#location = :location");
+      // Clear the previous fix when sharing is disabled or replaced by a manual city.
+      if (patch.location.mode !== "device") {
+        names["#last"] = "lastKnownLocation";
+        values[":last"] = null;
+        changes.push("#last = :last");
+      }
+    }
     const result = await client.send(new UpdateCommand({
       TableName: table(), Key: { userId: user.sub },
       ConditionExpression: "attribute_exists(userId)",
@@ -87,9 +119,26 @@ export function createProfileStore(
       ExpressionAttributeNames: names, ExpressionAttributeValues: values,
       ReturnValues: "ALL_NEW",
     }));
-    return result.Attributes as UserProfile;
+    return normalize(result.Attributes as UserProfile);
   }
-  return { ensure, update };
+  async function recordLocation(user: UserIdentity, fix: SavedLocation): Promise<UserProfile> {
+    try {
+      const result = await client.send(new UpdateCommand({
+        TableName: table(), Key: { userId: user.sub },
+        // A concurrent opt-out or newer fix must win over this in-flight request.
+        ConditionExpression: "#prefs.#location.#mode = :device AND (attribute_not_exists(#last.#captured) OR #last.#captured <= :captured)",
+        UpdateExpression: "SET #last = :fix",
+        ExpressionAttributeNames: { "#prefs": "preferences", "#location": "location", "#mode": "mode", "#last": "lastKnownLocation", "#captured": "capturedAt" },
+        ExpressionAttributeValues: { ":device": "device", ":captured": fix.capturedAt, ":fix": fix },
+        ReturnValues: "ALL_NEW",
+      }));
+      return normalize(result.Attributes as UserProfile);
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== "ConditionalCheckFailedException") throw error;
+      return ensure(user);
+    }
+  }
+  return { ensure, update, recordLocation };
 }
 
 export const profileStore = createProfileStore();

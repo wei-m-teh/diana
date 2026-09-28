@@ -2,6 +2,7 @@
 import base64
 import json
 import os
+import subprocess
 from pathlib import Path
 import time
 import unittest
@@ -38,6 +39,18 @@ class DianaConversation(unittest.TestCase):
         self.session = result['sessionId']
         self.artifacts = Path(os.environ.get('DEVICEFARM_LOG_DIR', '.'))
 
+    def shell(self, *args):
+        return subprocess.check_output(
+            ['adb', '-s', os.environ['DEVICEFARM_DEVICE_UDID'], 'shell', *args],
+            text=True, timeout=30)
+
+    def service_active(self):
+        status = self.shell('dumpsys', 'activity', 'services',
+                            'com.livekit.example.VoiceAssistantFlutter')
+        self.assertIn('ConversationService', status)
+        self.assertIn('isForeground=true', status)
+        return status
+
     def capture(self, name):
         self.artifacts.joinpath(name + '.xml').write_text(self.api('GET', '/source'))
         self.artifacts.joinpath(name + '.png').write_bytes(
@@ -65,7 +78,10 @@ class DianaConversation(unittest.TestCase):
         password = self.find('xpath', '//android.widget.EditText[@password="true"]')
         self.api('POST', '/element/' + password + '/click', {})
         self.api('POST', '/element/' + password + '/value', {'text': credentials['password']})
-        # Do not send Android Back to a Custom Tab: that can cancel OAuth.
+        # Dismiss only a visible keyboard; an unconditional Back can cancel OAuth.
+        if self.api('GET', '/appium/device/is_keyboard_shown'):
+            self.api('POST', '/appium/device/hide_keyboard', {})
+        time.sleep(1)
         submit = self.find('xpath', '//android.widget.Button[@text="Sign in"]')
         self.api('POST', '/element/' + submit + '/click', {})
         del credentials
@@ -96,12 +112,52 @@ class DianaConversation(unittest.TestCase):
             # of our outgoing message cannot satisfy this assertion.
             self.find('xpath', f'//*[contains(@text,"{answer}") or contains(@content-desc,"{answer}")]')
             self.capture(f'0{index + 1}-reply')
+            if index == 1:
+                self.tap('Unmute microphone')
+                self.service_active()
+                before_pid = self.shell('pidof', 'com.livekit.example.VoiceAssistantFlutter').strip()
+                self.shell('input', 'keyevent', '223')
+                time.sleep(45)
+                power = self.shell('dumpsys', 'power')
+                self.assertRegex(power, r'mWakefulness=(Asleep|Dozing)')
+                self.assertIn('Diana:Conversation', power)
+                self.artifacts.joinpath('screen-off-service.txt').write_text(self.service_active())
+                self.assertEqual(before_pid, self.shell('pidof', 'com.livekit.example.VoiceAssistantFlutter').strip())
+                self.shell('input', 'keyevent', '224')
+                self.shell('wm', 'dismiss-keyguard')
+                self.find('accessibility id', 'End call')
+                self.tap('Mute microphone')
+                self.capture('after-unlock')
         self.tap('End call')
+        self.find('accessibility id', 'TALK TO DIANA')
+        time.sleep(2)
+        self.assertNotIn('isForeground=true', self.shell('dumpsys', 'activity', 'services',
+                                                     'com.livekit.example.VoiceAssistantFlutter'))
+        # A second call must start after foreground-service cleanup.
+        self.tap('TALK TO DIANA')
+        self.find('accessibility id', 'End call')
+        self.service_active()
+        self.api('POST', '/appium/device/open_notifications', {})
+        time.sleep(1)
+        # Samsung may initially collapse an ongoing notification.
+        actions = self.api('POST', '/elements', {'using': 'xpath', 'value': '//*[translate(@text,"END","end")="end"]'})
+        if not actions:
+            expand = self.api('POST', '/elements', {'using': 'id', 'value': 'android:id/expand_button'})
+            if expand:
+                self.api('POST', '/element/' + expand[0]['element-6066-11e4-a52e-4f735466cecf'] + '/click', {})
+        end = self.find('xpath', '//*[translate(@text,"END","end")="end"]')
+        self.api('POST', '/element/' + end + '/click', {})
+        time.sleep(2)
+        self.assertNotIn('isForeground=true', self.shell('dumpsys', 'activity', 'services',
+                                                     'com.livekit.example.VoiceAssistantFlutter'))
+        self.shell('input', 'keyevent', '4')
         self.find('accessibility id', 'TALK TO DIANA')
         self.capture('04-disconnected')
 
     def tearDown(self):
         if self.session:
+            self.shell('input', 'keyevent', '224')
+            self.shell('wm', 'dismiss-keyguard')
             try:
                 self.capture('final')
             finally:

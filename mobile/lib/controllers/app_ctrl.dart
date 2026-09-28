@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -9,12 +10,16 @@ import 'package:uuid/uuid.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import '../services/cognito_auth.dart';
+import '../services/background_call.dart';
+import '../services/device_timezone.dart';
+import '../services/session_context.dart';
+import '../services/search_sources.dart';
 
 enum AppScreenState { welcome, agent }
 
 enum AgentScreenState { visualizer, transcription }
 
-class AppCtrl extends ChangeNotifier {
+class AppCtrl extends ChangeNotifier with WidgetsBindingObserver {
   static const uuid = Uuid();
   static final _logger = Logger('AppCtrl');
 
@@ -38,17 +43,17 @@ class AppCtrl extends ChangeNotifier {
   // agent (see ../../agent/src/agent.py).
   static const agentName = 'diana';
 
-  static sdk.Session _createSession({required sdk.Room room}) {
+  sdk.Session _createSession({required sdk.Room room}) {
     final endpoint = dotenv.env['LIVEKIT_TOKEN_ENDPOINT']?.trim() ?? '';
     return sdk.Session.withAgent(
       agentName,
       tokenSource: sdk.CustomTokenSource((options) async {
         if (!endpoint.startsWith('https://')) throw StateError('An HTTPS session endpoint is required');
         final token = await cognitoAuth.accessToken();
-        return sdk.EndpointTokenSource(
-          url: Uri.parse(endpoint),
-          headers: {'Authorization': 'Bearer $token'},
-        ).fetch(options);
+        if (_ending || _hasCleanedUp) throw StateError('Conversation start cancelled');
+        final result = await fetchSessionContext(endpoint, token);
+        if (_ending || _hasCleanedUp) throw StateError('Conversation start cancelled');
+        return result;
       }),
       options: sdk.SessionOptions(room: room),
     );
@@ -57,8 +62,53 @@ class AppCtrl extends ChangeNotifier {
   bool isSendButtonEnabled = false;
   bool isSessionStarting = false;
   bool _hasCleanedUp = false;
+  bool _ending = false;
+  final BackgroundCall _backgroundCall = BackgroundCall();
+  String? connectionError;
+  final List<SearchSources> searchSources = [];
+  sdk.EventsListener<sdk.RoomEvent>? _contextListener;
+  Timer? _timezoneTimer;
+  String? _lastTimezone;
+
+  Future<void> _syncTimezone() async {
+    if (_hasCleanedUp || session.connectionState != sdk.ConnectionState.connected) return;
+    final zone = await DeviceTimezone.current();
+    if (zone == null || zone == _lastTimezone || _hasCleanedUp) return;
+    try {
+      final participant = room.localParticipant;
+      if (participant == null) return;
+      await participant.publishData(utf8.encode(jsonEncode({'timezone': zone})),
+          reliable: true, topic: 'diana.timezone');
+      _lastTimezone = zone;
+    } catch (_) {/* Retry on next poll or resume. */}
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(_syncTimezone());
+  }
 
   AppCtrl() {
+    WidgetsBinding.instance.addObserver(this);
+    _timezoneTimer = Timer.periodic(const Duration(seconds: 30), (_) => unawaited(_syncTimezone()));
+    _contextListener = room.createListener()
+      ..on<sdk.DataReceivedEvent>((event) {
+        if (event.topic != 'diana.sources' ||
+            event.participant?.kind != sdk.ParticipantKind.AGENT ||
+            event.data.length > 16000) {
+          return;
+        }
+        try {
+          final sources = SearchSources.parse(jsonDecode(utf8.decode(event.data)));
+          if (sources != null && !_hasCleanedUp) {
+            searchSources.removeWhere((item) => item.id == sources.id);
+            searchSources.add(sources);
+            if (searchSources.length > 10) searchSources.removeAt(0);
+            notifyListeners();
+          }
+        } catch (_) {/* Ignore malformed source messages. */}
+      });
+    _backgroundCall.onEnd(disconnect);
     final format = DateFormat('HH:mm:ss');
     // configure logs for debugging
     Logger.root.level = Level.WARNING;
@@ -80,9 +130,14 @@ class AppCtrl extends ChangeNotifier {
   Future<void> cleanUp() async {
     if (_hasCleanedUp) return;
     _hasCleanedUp = true;
+    WidgetsBinding.instance.removeObserver(this);
+    _timezoneTimer?.cancel();
+    await _contextListener?.dispose();
 
     session.removeListener(_handleSessionChange);
+    _backgroundCall.onEnd(null);
     await session.dispose();
+    await _backgroundCall.stop();
     await room.dispose();
     roomContext.dispose();
     messageCtrl.dispose();
@@ -131,28 +186,58 @@ class AppCtrl extends ChangeNotifier {
 
     _logger.info('Starting session connection…');
     isSessionStarting = true;
+    _lastTimezone = null;
+    searchSources.clear();
+    connectionError = null;
     notifyListeners();
 
     try {
+      await _backgroundCall.start();
+      if (_hasCleanedUp || _ending) {
+        await _backgroundCall.stop();
+        return;
+      }
       await session.start();
+      if (_ending) {
+        await session.end();
+        return;
+      }
       if (session.connectionState == sdk.ConnectionState.connected) {
         appScreenState = AppScreenState.agent;
         notifyListeners();
       }
     } catch (error, stackTrace) {
       _logger.severe('Connection error: $error', error, stackTrace);
+      try {
+        await session.end();
+      } finally {
+        await _backgroundCall.stop();
+      }
+      connectionError = 'Could not start the conversation. Check microphone permission and try again.';
       appScreenState = AppScreenState.welcome;
       notifyListeners();
     } finally {
+      if (session.connectionState == sdk.ConnectionState.disconnected) {
+        await _backgroundCall.stop();
+      }
       if (isSessionStarting) {
         isSessionStarting = false;
+        _ending = false;
         notifyListeners();
       }
     }
   }
 
   Future<void> disconnect() async {
-    await session.end();
+    if (_ending) return;
+    _ending = true;
+    try {
+      await session.end();
+    } finally {
+      await _backgroundCall.stop();
+      // Leave the flag set until an in-flight start has finished cancelling.
+      if (!isSessionStarting) _ending = false;
+    }
     session.restoreMessageHistory(const []);
     appScreenState = AppScreenState.welcome;
     agentScreenState = AgentScreenState.visualizer;
@@ -164,10 +249,15 @@ class AppCtrl extends ChangeNotifier {
     AppScreenState? nextScreen;
     switch (state) {
       case sdk.ConnectionState.connected:
+        unawaited(_syncTimezone());
+        nextScreen = AppScreenState.agent;
+        break;
       case sdk.ConnectionState.reconnecting:
+        _lastTimezone = null;
         nextScreen = AppScreenState.agent;
         break;
       case sdk.ConnectionState.disconnected:
+        if (!isSessionStarting) unawaited(_backgroundCall.stop());
         nextScreen = AppScreenState.welcome;
         break;
       case sdk.ConnectionState.connecting:

@@ -45,7 +45,7 @@ function cloneSingleChild(
 
 export const AgentAudioVisualizerBarElementVariants = cva(
   [
-    'rounded-full transition-colors duration-250 ease-linear',
+    'rounded-full transition-[height,background-color] duration-150 ease-out motion-reduce:transition-none',
     'bg-current/10 data-[lk-highlighted=true]:bg-current',
   ],
   {
@@ -208,6 +208,8 @@ export function AgentAudioVisualizerBar({
             {cloneSingleChild(children, {
               'data-lk-index': idx,
               'data-lk-highlighted': highlightedIndices.includes(idx),
+              className:
+                'transition-[height,background-color] duration-150 ease-out motion-reduce:transition-none',
               style: { height: `${band * 100}%` },
             })}
           </React.Fragment>

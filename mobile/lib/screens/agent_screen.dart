@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:livekit_client/livekit_client.dart' as sdk;
 import 'package:livekit_components/livekit_components.dart' as components;
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../controllers/app_ctrl.dart';
 import '../support/agent_selector.dart';
@@ -156,6 +157,29 @@ class AgentScreen extends StatelessWidget {
               mainAxisSize: MainAxisSize.max,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Consumer<AppCtrl>(
+                    builder: (context, controller, _) => ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 180),
+                          child: ListView(
+                              shrinkWrap: true,
+                              children: controller.searchSources
+                                  .map((result) => ExpansionTile(
+                                        title: Text('Sources: ${result.query}'),
+                                        subtitle: Text(
+                                            'Checked ${DateTime.tryParse(result.retrievedAt)?.toLocal() ?? result.retrievedAt}'),
+                                        children: result.sources
+                                            .map((source) => ListTile(
+                                                  title: Text(source.title),
+                                                  subtitle: Text(source.url),
+                                                  onTap: () async {
+                                                    await launchUrl(Uri.parse(source.url),
+                                                        mode: LaunchMode.externalApplication);
+                                                  },
+                                                ))
+                                            .toList(),
+                                      ))
+                                  .toList()),
+                        )),
                 Expanded(
                   child: GestureDetector(
                     onTap: () => ctx.read<AppCtrl>().messageFocusNode.unfocus(),

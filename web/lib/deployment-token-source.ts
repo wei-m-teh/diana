@@ -1,14 +1,24 @@
 import { TokenSource } from 'livekit-client';
 import { accessToken, authentication } from './cognito-auth';
+import { deviceLocation } from './device-location';
+import { locationPreference } from './location';
+import { profileRequest } from './profile';
+import { deviceTimezone } from './timezone';
 
 // Only public deployment configuration is served from S3.
 export function createDeploymentTokenSource() {
   return TokenSource.custom(async () => {
     const { config } = await authentication();
     const token = await accessToken();
+    const profile = await profileRequest();
+    const fix =
+      locationPreference(profile.preferences.location).mode === 'device'
+        ? await deviceLocation()
+        : null;
     const response = await fetch(config.tokenEndpoint, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceTimezone: deviceTimezone(), deviceLocation: fix }),
       cache: 'no-store',
       credentials: 'omit',
     });

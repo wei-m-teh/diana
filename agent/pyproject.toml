@@ -9,7 +9,7 @@ description = "Diana: a personal companion voice/text AI agent built with LiveKi
 requires-python = ">=3.10, <3.15"
 
 dependencies = [
-    "livekit-agents[silero,turn-detector]==1.5.17",
+    "livekit-agents[images,openai,silero,turn-detector]==1.5.17",
     "livekit-plugins-ai-coustics~=0.2",
     "python-dotenv",
 ]

@@ -28,6 +28,10 @@ import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 
 export interface DianaStackProps extends StackProps {
   secretArn?: string;
+  openRouterSecretArn?: string;
+  openRouterModel?: string;
+  openRouterVisionModel?: string;
+  speechProvider?: string;
   googleClientId?: string;
   googleSecretArn?: string;
   desiredCount?: number;
@@ -44,6 +48,19 @@ export class DianaStack extends Stack {
     if (Boolean(props.googleClientId) !== Boolean(props.googleSecretArn)) {
       throw new Error("Set both GOOGLE_CLIENT_ID and GOOGLE_SECRET_ARN to enable Google sign-in");
     }
+    if (Boolean(props.openRouterSecretArn) !== Boolean(props.openRouterModel) ||
+        (props.openRouterVisionModel && !props.openRouterModel)) {
+      throw new Error("OpenRouter requires both OPENROUTER_SECRET_ARN and OPENROUTER_MODEL");
+    }
+    if (props.speechProvider && !["livekit", "openrouter"].includes(props.speechProvider)) {
+      throw new Error("DIANA_SPEECH_PROVIDER must be livekit or openrouter");
+    }
+    if (props.speechProvider === "openrouter" && !props.openRouterSecretArn) {
+      throw new Error("OpenRouter speech requires OPENROUTER_SECRET_ARN");
+    }
+    const openRouterSecret = props.openRouterSecretArn
+      ? secretsmanager.Secret.fromSecretCompleteArn(this, "OpenRouterCredentials", props.openRouterSecretArn)
+      : undefined;
     const root = join(__dirname, "../..");
     const webAssetPath = props.webAssetPath ?? join(root, "web/out");
     if (!existsSync(join(webAssetPath, "index.html"))) {
@@ -173,6 +190,7 @@ export class DianaStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
     });
     const profileEnvironment = {
+      COGNITO_WEB_CLIENT_ID: webClient.userPoolClientId,
       PROFILES_TABLE: profiles.tableName, COGNITO_USER_POOL_ID: userPool.userPoolId,
       COGNITO_ISSUER: issuer,
       COGNITO_CLIENT_IDS: `${webClient.userPoolClientId},${mobileClient.userPoolClientId}`,
@@ -204,7 +222,11 @@ export class DianaStack extends Stack {
       bundling: { minify: true, sourceMap: true, externalModules: [] },
     });
     secret.grantRead(tokenFunction);
-    profiles.grant(tokenFunction, "dynamodb:GetItem", "dynamodb:PutItem");
+    profiles.grant(tokenFunction, "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem");
+    tokenFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["geo-places:ReverseGeocode"],
+      resources: [`arn:${this.partition}:geo-places:${this.region}::provider/default`],
+    }));
     for (const fn of [tokenFunction, profileFunction]) {
       fn.addToRolePolicy(new iam.PolicyStatement({
         actions: ["cognito-idp:AdminGetUser"], resources: [userPool.userPoolArn],
@@ -300,8 +322,19 @@ export class DianaStack extends Stack {
       }),
       // Run Python directly so SIGTERM reaches the worker (instead of an uv parent).
       command: ["/app/.venv/bin/python", "src/agent.py", "start"],
-      environment: { PYTHONUNBUFFERED: "1" },
+      environment: {
+        PYTHONUNBUFFERED: "1",
+        ...(openRouterSecret ? {
+          DIANA_LLM_PROVIDER: "openrouter",
+          DIANA_SPEECH_PROVIDER: props.speechProvider ?? "livekit",
+          OPENROUTER_MODEL: props.openRouterModel!,
+          OPENROUTER_VISION_MODEL: props.openRouterVisionModel ?? props.openRouterModel!,
+        } : {}),
+      },
       secrets: {
+        ...(openRouterSecret ? {
+          OPENROUTER_API_KEY: ecs.Secret.fromSecretsManager(openRouterSecret, "OPENROUTER_API_KEY"),
+        } : {}),
         LIVEKIT_URL: ecs.Secret.fromSecretsManager(secret, "LIVEKIT_URL"),
         LIVEKIT_API_KEY: ecs.Secret.fromSecretsManager(
           secret,

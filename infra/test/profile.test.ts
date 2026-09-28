@@ -1,3 +1,4 @@
+import { DEFAULT_PERSONALITY } from "../../web/lib/personality";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { APIGatewayProxyEventV2WithJWTAuthorizer } from "aws-lambda";
@@ -41,6 +42,16 @@ function fixture() {
       return {};
     }
     assert.ok(command instanceof UpdateCommand);
+    if (input.UpdateExpression === "SET #last = :fix") {
+      const record = records.get(input.Key.userId)!;
+      assert.match(input.ConditionExpression, /#prefs.#location.#mode = :device/);
+      assert.match(input.ConditionExpression, /#last.#captured <= :captured/);
+      if (record.preferences.location?.mode !== 'device' || (record.lastKnownLocation && record.lastKnownLocation.capturedAt > input.ExpressionAttributeValues[':captured'])) {
+        throw Object.assign(new Error('conflict'), {name:'ConditionalCheckFailedException'});
+      }
+      record.lastKnownLocation = input.ExpressionAttributeValues[':fix'];
+      return {Attributes:structuredClone(record)};
+    }
     assert.equal(input.ConditionExpression, "attribute_exists(userId)");
     assert.equal(input.ReturnValues, "ALL_NEW");
     const record = records.get(input.Key.userId)!;
@@ -66,7 +77,7 @@ test("first access creates trusted defaults and subsequent logins preserve chang
   assert.equal(first.email, identity.email);
   assert.equal(first.emailVerified, true);
   assert.equal(first.displayName, identity.displayName);
-  assert.deepEqual(first.preferences, { voiceKey: "delia" });
+  assert.deepEqual(first.preferences, { voiceKey: "delia", personality: DEFAULT_PERSONALITY, timezone: null, location: {mode:"off"} });
   assert.deepEqual(first.subscription, { planId: "free", status: "active" });
   assert.ok(Date.parse(first.createdAt));
   await f.handler(event("PATCH", { displayName: "  Custom  ", voiceKey: "thalia" }));
@@ -154,4 +165,105 @@ test("existing session clients provision profiles before issuing room tokens", a
   const fail = createTokenHandler(async () => { secretsRead = true; throw new Error("unexpected"); }, async () => { throw new Error("storage failure"); });
   assert.equal((await fail(request)).statusCode, 503);
   assert.equal(secretsRead, false);
+});
+
+test("personality is validated, saved independently, and normalized for legacy profiles", async () => {
+  const f = fixture();
+  await f.store.ensure(user);
+  delete (f.records.get(user.sub)!.preferences as any).personality;
+  assert.deepEqual((await f.store.ensure(user)).preferences.personality, DEFAULT_PERSONALITY);
+  const personality = { ...DEFAULT_PERSONALITY, openness: 0, extraversion: 100 };
+  const saved = await f.handler(event("PATCH", { personality }));
+  assert.equal(saved.statusCode, 200);
+  await f.store.update(user, { voiceKey: "thalia" });
+  assert.deepEqual((await f.store.ensure(user)).preferences, { voiceKey: "thalia", personality, timezone: null, location: {mode:"off"} });
+  assert.deepEqual((await f.store.ensure({ ...user, sub: "user-b" })).preferences.personality, DEFAULT_PERSONALITY);
+  for (const invalid of [null, [], {}, { ...personality, extra: 1 }, ...[-1, 101, true, "50", 1.5].map(openness => ({ ...personality, openness }))]) {
+    assert.equal((await f.handler(event("PATCH", { personality: invalid }))).statusCode, 400);
+  }
+  assert.deepEqual((await f.store.ensure(user)).preferences.personality, personality);
+});
+
+test("signed dispatch uses saved personality only for verified web clients", async () => {
+  process.env.COGNITO_WEB_CLIENT_ID = "web-client";
+  const f = fixture();
+  const personality = { ...DEFAULT_PERSONALITY, openness: 100 };
+  await f.store.update(user, { personality });
+  const handler = createTokenHandler(async () => ({ LIVEKIT_URL: "wss://test.livekit.cloud", LIVEKIT_API_KEY: "test", LIVEKIT_API_SECRET: "test-secret-at-least-thirty-two-characters" }), f.store.ensure);
+  const request = event("POST", { personality: { openness: 0 }, metadata: "malicious", client_id: "web-client" });
+  request.rawPath = "/sessions";
+  const dispatch = async () => {
+    const response = await handler(request);
+    assert.equal(response.statusCode, 200);
+    const jwt = JSON.parse(response.body as string).participantToken;
+    return JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString()).roomConfig.agents[0];
+  };
+  const webMetadata = JSON.parse((await dispatch()).metadata);
+  assert.equal(webMetadata.vision, true);
+  assert.deepEqual(webMetadata.personality, { version: 1, traits: personality });
+  assert.deepEqual(webMetadata.timezone, { mode: "device", name: null });
+  assert.match(webMetadata.participantIdentity, /^user_user-a_/);
+  request.requestContext.authorizer.jwt.claims.client_id = "mobile-client";
+  const mobileMetadata = JSON.parse((await dispatch()).metadata);
+  assert.equal(mobileMetadata.personality, undefined);
+  assert.equal(mobileMetadata.vision, undefined);
+  assert.deepEqual(mobileMetadata.timezone, { mode: "device", name: null });
+  delete process.env.COGNITO_WEB_CLIENT_ID;
+});
+
+
+test("timezone preference is shared, nullable and validated", async () => {
+  const f = fixture();
+  assert.equal((await f.handler(event("PATCH", { timezone: "America/New_York" }))).statusCode, 200);
+  const mobile = event();
+  mobile.requestContext.authorizer.jwt.claims.client_id = "mobile-client";
+  assert.equal(JSON.parse((await f.handler(mobile)).body).preferences.timezone, "America/New_York");
+  assert.equal((await f.handler(event("PATCH", { timezone: "inject instructions" }))).statusCode, 400);
+  const restored = await f.handler(event("PATCH", { timezone: null }));
+  assert.equal(JSON.parse(restored.body).preferences.timezone, null);
+});
+
+
+test("location is opt-in, persists across sessions, and cannot be restored after opting out", async () => {
+  const f = fixture();
+  await f.store.update(user, {location:{mode:'device'}});
+  const fix = {latitude:47.61,longitude:-122.33,accuracyMeters:1000,capturedAt:new Date().toISOString(),city:'Seattle, Washington, USA'};
+  await f.store.recordLocation(user, fix);
+  assert.deepEqual((await f.store.ensure(user)).lastKnownLocation, fix);
+  const older = {...fix,capturedAt:'2020-01-01T00:00:00.000Z',city:'Old city'};
+  assert.deepEqual((await f.store.recordLocation(user,older)).lastKnownLocation,fix);
+  await f.handler(event('PATCH',{location:{mode:'off'}}));
+  assert.equal((await f.store.recordLocation(user,fix)).lastKnownLocation,null);
+  assert.equal((await f.store.ensure({...user,sub:'different-user'})).lastKnownLocation,undefined);
+  assert.equal((await f.handler(event('PATCH',{location:{mode:'manual',city:'Paris, France'}}))).statusCode,200);
+  assert.equal((await f.store.ensure(user)).lastKnownLocation,null);
+  for (const value of [{mode:'unknown'},{mode:'manual',city:''},{mode:'device',latitude:0}]) {
+    assert.equal((await f.handler(event('PATCH',{location:value}))).statusCode,400);
+  }
+});
+
+test("web and mobile sessions refresh location; failed fixes use dated history; body cannot enable sharing", async () => {
+  const f = fixture();
+  let geocodes = 0;
+  const handler = createTokenHandler(async () => ({LIVEKIT_URL:'wss://test.livekit.cloud',LIVEKIT_API_KEY:'test',LIVEKIT_API_SECRET:'test-secret-at-least-thirty-two-characters'}),f.store.ensure,f.store.recordLocation, async () => { geocodes++; return 'Seattle, Washington, USA'; });
+  const fix = {latitude:47.60621,longitude:-122.33207,accuracyMeters:20,capturedAt:new Date().toISOString()};
+  const dispatch = async (body:any, client='web-client') => {
+    const request = event('POST',body); request.rawPath='/sessions';
+    request.requestContext.authorizer.jwt.claims.client_id=client;
+    const response=await handler(request); assert.equal(response.statusCode,200);
+    const jwt=JSON.parse(response.body as string).participantToken;
+    return JSON.parse(JSON.parse(Buffer.from(jwt.split('.')[1],'base64url').toString()).roomConfig.agents[0].metadata).location;
+  };
+  assert.deepEqual(await dispatch({deviceLocation:fix,location:{mode:'device'}}),{source:'unavailable'});
+  assert.equal(geocodes,0);
+  await f.store.update(user,{location:{mode:'device'}});
+  const fresh=await dispatch({deviceLocation:fix});
+  assert.equal(fresh.source,'device'); assert.equal(fresh.latitude,47.61);
+  assert.equal((await dispatch({},'mobile-client')).source,'last_known');
+  assert.equal((await dispatch({deviceLocation:fix},'mobile-client')).source,'device');
+  await f.store.update(user,{location:{mode:'manual',city:'Paris, France'}});
+  assert.deepEqual(await dispatch({deviceLocation:fix}),{source:'manual',city:'Paris, France'});
+  assert.equal(geocodes,2);
+  const bad=event('POST',{deviceLocation:{...fix,latitude:999}}); bad.rawPath='/sessions';
+  assert.equal((await handler(bad)).statusCode,400);
 });

@@ -112,3 +112,21 @@ Shared CDK bootstrap resources and the shared EC2 development host are not
 exclusively allocated to Diana. Some service charges do not support resource-tag
 allocation; shared costs need separate attribution. LiveKit/inference charges
 billed outside AWS will not appear in this AWS tag filter.
+
+## Personality settings
+
+The web profile settings include five saved personality sliders. See
+[Web personality settings](PERSONALITY.md) for behavior, storage, testing, and deployment.
+
+## Camera vision
+
+[Web camera vision](VISION.md) documents the on-demand camera tool, data flow,
+controls, and verification steps.
+
+For optional direct language-model access, see [OpenRouter configuration](OPENROUTER.md).
+
+[Time awareness and web search](TIME_AND_SEARCH.md) covers device timezone detection,
+shared timezone preferences, search citations, and validation for web and Android.
+
+[Location sharing](LOCATION.md) covers permission controls, per-conversation
+location refresh, saved-location fallback and the AWS city lookup.

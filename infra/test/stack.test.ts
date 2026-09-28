@@ -102,9 +102,13 @@ test(`deploys protected infrastructure with Google enabled=${googleEnabled}`, ()
     for (const [id, policy] of profilePolicies) {
       const statements = policy.Properties.PolicyDocument.Statement;
       const database = statements.find((statement: any) => JSON.stringify(statement.Action).includes("dynamodb:"));
-      assert.deepEqual(database.Action, id.startsWith("ProfileFunction")
-        ? ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]
-        : ["dynamodb:GetItem", "dynamodb:PutItem"]);
+      assert.deepEqual(database.Action, ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]);
+      const location = statements.find((statement: any) => statement.Action === "geo-places:ReverseGeocode");
+      if (id.startsWith("TokenFunction")) {
+        assert.ok(location);
+        assert.equal(JSON.stringify(location.Resource).includes("*"), false);
+        assert.ok(JSON.stringify(location.Resource).includes("provider/default"));
+      } else assert.equal(location, undefined);
       assert.equal(JSON.stringify(database.Resource).includes("*"), false);
       const lookup = statements.find((statement: any) => statement.Action === "cognito-idp:AdminGetUser");
       assert.ok(lookup);
@@ -143,4 +147,47 @@ test("rejects partially configured Google sign-in", () => {
     assert.throws(() => new DianaStack(new App(), "Invalid", settings),
       /Set both GOOGLE_CLIENT_ID and GOOGLE_SECRET_ARN/);
   }
+});
+
+test("OpenRouter is injected only into the agent as a secret reference", () => {
+  const directory = mkdtempSync(join(tmpdir(), "diana-openrouter-"));
+  try {
+    writeFileSync(join(directory, "index.html"), "<html>Diana</html>");
+    const secretArn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:diana/openrouter-AbCdEf";
+    const stack = new DianaStack(new App(), "RouterTest", {
+      webAssetPath: directory,
+      secretArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:diana/livekit-AbCdEf",
+      openRouterSecretArn: secretArn,
+      openRouterModel: "vendor/chat",
+      openRouterVisionModel: "vendor/vision",
+      speechProvider: "openrouter",
+    });
+    const template = Template.fromStack(stack);
+    template.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([Match.objectLike({
+        Environment: Match.arrayWith([
+          { Name: "DIANA_LLM_PROVIDER", Value: "openrouter" },
+          { Name: "DIANA_SPEECH_PROVIDER", Value: "openrouter" },
+          { Name: "OPENROUTER_MODEL", Value: "vendor/chat" },
+          { Name: "OPENROUTER_VISION_MODEL", Value: "vendor/vision" },
+        ]),
+        Secrets: Match.arrayWith([{ Name: "OPENROUTER_API_KEY", ValueFrom: `${secretArn}:OPENROUTER_API_KEY::` }]),
+      })]),
+    });
+    const lambdas = template.findResources("AWS::Lambda::Function");
+    for (const resource of Object.values(lambdas)) {
+      assert.ok(!JSON.stringify(resource.Properties.Environment ?? {}).includes("OPENROUTER"));
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("incomplete OpenRouter deployment config is rejected", () => {
+  for (const config of [{ openRouterModel: "vendor/chat" }, { openRouterSecretArn: "secret" }, { openRouterVisionModel: "vendor/vision" }]) {
+    assert.throws(() => new DianaStack(new App(), "InvalidRouter", config), /OpenRouter/);
+  }
+});
+
+test("OpenRouter speech requires credentials and rejects invalid providers", () => {
+  assert.throws(() => new DianaStack(new App(), "SpeechNoKey", { speechProvider: "openrouter" }), /OpenRouter speech/);
+  assert.throws(() => new DianaStack(new App(), "SpeechTypo", { speechProvider: "typo" }), /DIANA_SPEECH_PROVIDER/);
 });

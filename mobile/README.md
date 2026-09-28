@@ -60,3 +60,32 @@ The current APK is ARM64 and uses the project's development signing key.
 Download links last at most one hour and can be regenerated. CDK manages a
 separate private MobileDownloads bucket with public access blocked and a
 one-day object expiration rule. No public bucket or Lambda policy is used.
+
+## Screen-off conversations on Android
+
+Build 16 starts a microphone/media-playback foreground service when you tap
+Talk to Diana, before connecting LiveKit. Grant microphone access and allow
+notifications to see the ongoing Diana notification and its End action. The
+service holds a partial CPU wake lock during the call; it does not keep the
+screen illuminated. LiveKit retains its communication audio routing, including
+connected earbuds.
+
+End, Sign out, a terminal disconnection, failed startup, or dismissing the app
+cleans up the service and wake lock. Reconnecting keeps the service active.
+The service is not restarted after a process kill and never starts a microphone
+session at boot. Force-stopping the app ends the conversation.
+
+This is Android-only. The web browser and iOS behavior are unchanged.
+The call needs network connectivity even while the screen is locked.
+
+Implementation follows Android's microphone foreground-service requirements:
+https://developer.android.com/develop/background-work/services/fgs/service-types#microphone
+
+## Location sharing (build 18)
+
+Profile / Settings → Location supports approximate device location, a manual
+city, or Off. Save the preference and allow location access on each device.
+Device mode refreshes once when starting a conversation and falls back to the
+dated last-known account location if a new fix is unavailable. Off clears the
+saved fix. This feature requires the matching backend deployment; see
+[Location sharing](../infra/LOCATION.md).
