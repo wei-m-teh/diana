@@ -22,3 +22,6 @@ out/
 
 # Local mobile build toolchains and caches
 .build-tools/
+
+# Opt-in conversation evaluation artifacts
+agent/eval-results/
