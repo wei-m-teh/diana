@@ -61,8 +61,12 @@ schemes. Sources appear in expandable cards in the transcript. Up to ten recent
 search cards are kept in the current client session; they are not persisted.
 URLs are not read aloud. Retrieval time is not claimed to be publication time.
 
-The search tool queues a brief, interruptible spoken acknowledgment before
-starting its network request. Playback and search run concurrently. This avoids
+The LLM supplies a short contextual `acknowledgment` with its search query.
+The search tool queues that interruptible speech before starting its network
+request, once per reply even if multiple searches are needed. Empty or overly
+long acknowledgments fall back to "Let me check that." If the model has already
+emitted a spoken preamble before the search call, the tool skips its own
+acknowledgment to prevent a duplicate announcement. Playback and search run concurrently. This avoids
 silence during the lookup without requiring a separate LLM generation; the
 ordinary response follows once results arrive. The acknowledgment change was deployed with location sharing in agent revision
 13 on September 28, 2026; see [Location sharing](LOCATION.md).

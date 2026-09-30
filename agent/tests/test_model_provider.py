@@ -78,3 +78,49 @@ async def test_real_plugin_uses_openrouter_endpoint(monkeypatch):
     async with create_llm() as model:
         assert str(model._client.base_url) == "https://openrouter.ai/api/v1/"
         assert model.model == "vendor/chat"
+
+
+async def test_deepseek_conversation_disables_reasoning_on_wire(monkeypatch):
+    import json
+
+    import httpx
+    from livekit.agents import llm
+    from openai import AsyncOpenAI
+
+    monkeypatch.setenv("DIANA_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "deepseek/deepseek-v4.1-flash")
+    requests = []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            text='data: {"id":"test","choices":[{"index":0,"delta":{"content":"Hi."},"finish_reason":null}]}\n\ndata: [DONE]\n\n',
+        )
+
+    async with (
+        httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http,
+        AsyncOpenAI(api_key="test-key", http_client=http) as client,
+        create_llm() as model,
+    ):
+        model._client = client
+        context = llm.ChatContext()
+        context.add_message(role="user", content="Hi")
+        async with model.chat(chat_ctx=context) as stream:
+            async for _ in stream:
+                pass
+    assert requests[0]["reasoning"] == {"enabled": False}
+    assert requests[0]["model"] == "deepseek/deepseek-v4.1-flash"
+
+
+def test_deepseek_vision_keeps_existing_reasoning_default(monkeypatch):
+    monkeypatch.setenv("DIANA_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("OPENROUTER_MODEL", "deepseek/deepseek-v4.1-flash")
+    with patch("model_provider.openai.LLM.with_openrouter") as factory:
+        create_llm(vision=True)
+        factory.assert_called_once_with(
+            model="deepseek/deepseek-v4.1-flash", api_key="test-key"
+        )

@@ -1,3 +1,4 @@
+import json
 import os
 import textwrap
 
@@ -513,11 +514,27 @@ async def test_search_tool_is_used_only_for_lookup():
             user_input="Please look up the current Sunday opening time of Seattle Central Library in Seattle, Washington."
         )
         assert search.search.await_count >= 1
-        assert any(
-            getattr(getattr(event, "item", None), "text_content", None)
-            == "Let me look that up for you."
+        calls = [
+            event.item
             for event in result.events
+            if getattr(getattr(event, "item", None), "name", None) == "search_web"
+            and hasattr(event.item, "arguments")
+        ]
+        acknowledgment = json.loads(calls[0].arguments)["acknowledgment"]
+        assert 0 < len(acknowledgment) <= 200
+        assert any(
+            word in acknowledgment.lower() for word in ("open", "hour", "library")
         )
+        messages = [
+            event.item.text_content
+            for event in result.events
+            if getattr(event, "type", "") == "message"
+            and event.item.role == "assistant"
+        ]
+        # One announcement (model preamble OR tool speech), then the answer.
+        # Counting the tool's exact phrase alone misses differently worded duplicates.
+        assert len(messages) == 2, messages
+        assert "10" in messages[-1] or "ten" in messages[-1].lower(), messages
         print(
             "search reply",
             [
@@ -580,3 +597,169 @@ async def test_old_location_is_confirmed_before_local_search():
         ).lower()
         assert "seattle" in text and "?" in text
         assert any(word in text for word in ("last", "saved", "ago", "still"))
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I spent twenty minutes looking for my glasses. They were on my head.",
+        "My meeting got cancelled. I could finally start that painting, or just go sit in the cafe for a bit.",
+        "My cat died this morning. I keep expecting to see her in her usual spot by the window.",
+    ],
+)
+async def test_conversational_wording_fits_the_moment(message):
+    async with _judge_llm() as judge, AgentSession() as session:
+        await session.start(Diana())
+        result = await session.run(user_input=message)
+        reply = result.expect.next_event().is_message(role="assistant")
+        print(f"wording input={message!r} reply={reply.event().item.text_content!r}")
+        await reply.judge(
+            judge,
+            intent=(
+                f"The user said: {message!r}. Evaluate the reply in that context. "
+                "Sounds like an informal spoken reply to this specific remark, not a "
+                "polished mini-essay, advice report, or therapy script. Uses ordinary "
+                "words and a natural conversational cadence; reactions, fragments, "
+                "contractions or a small thinking hesitation may help but no specific "
+                "filler is mandatory. Engages with the concrete detail rather than "
+                "explaining the user's psychology or packaging a life lesson. Matches "
+                "the seriousness: humor is welcome for a lighthearted mishap, but "
+                "no jokes or performative hesitation when the user describes grief. "
+                "Does not invent personal experiences. No forced menu of options, "
+                "unsolicited action plan, theatrical stage directions or long monologue."
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Why do I feel more tired after sleeping in? Just curious.",
+        "I tried that little cafe down the street. The coffee was terrible but I kind of liked the place.",
+        "I'm trying to pick a movie, but I keep scrolling instead of watching anything.",
+    ],
+)
+async def test_everyday_language_over_formal_explanation(message):
+    async with _judge_llm() as judge, AgentSession() as session:
+        await session.start(Diana())
+        result = await session.run(user_input=message)
+        reply = result.expect.next_event().is_message(role="assistant")
+        print(f"informal input={message!r} reply={reply.event().item.text_content!r}")
+        await reply.judge(
+            judge,
+            intent=(
+                f"The user said: {message!r}. Reply should sound like relaxed everyday "
+                "speech with familiar words, rather than an article, customer-service "
+                "response, lecture, or polished therapeutic interpretation. Any "
+                "explanation stays accessible and grounded without an elaborate metaphor "
+                "or labeling the user's psychology. Does not invent personal experiences "
+                "or diagnose the user. No forced slang, pet names, filler quota, or "
+                "overfamiliarity. A useful explanation can be several sentences; do not "
+                "reward a terse answer just for being short. A casual remark need not "
+                "receive an explanation at all. A natural follow-up question is allowed. "
+                "Evaluate everyday wording and tone, not the absence of questions."
+            ),
+        )
+
+
+async def test_default_explanation_leaves_room_for_followup():
+    async with AgentSession() as session:
+        await session.start(Diana())
+        result = await session.run(
+            user_input="Why does my phone get warm when it's charging? Just curious."
+        )
+        text = (
+            result.expect.next_event()
+            .is_message(role="assistant")
+            .event()
+            .item.text_content
+        )
+        print(f"shorter default: {text!r}")
+        assert text and len(text.split()) <= 90, text
+        detail = await session.run(
+            user_input="Can you go into more detail about where that heat comes from and how wireless charging differs?"
+        )
+        expanded = (
+            detail.expect.next_event()
+            .is_message(role="assistant")
+            .event()
+            .item.text_content
+        )
+        print(f"requested detail: {expanded!r}")
+        assert expanded and len(expanded.split()) > len(text.split()), expanded
+        assert "wireless" in expanded.lower(), expanded
+
+
+@pytest.mark.parametrize("level", [0, 50, 100])
+async def test_ordinary_replies_stay_compact_across_conversation(level):
+    from personality import TRAIT_KEYS
+
+    async with AgentSession() as session:
+        await session.start(Diana(personality=dict.fromkeys(TRAIT_KEYS, level)))
+        for message in [
+            "Why does my phone get warm when charging? Just curious.",
+            "Does wireless charging do that too?",
+            "Anyway, I finally have a free afternoon and can't decide what to do.",
+            "I want to get outside but I don't want a whole expedition.",
+            "I might just walk to the cafe. Their coffee is awful but the chairs are great.",
+        ]:
+            result = await session.run(user_input=message)
+            text = (
+                result.expect.next_event()
+                .is_message(role="assistant")
+                .event()
+                .item.text_content
+            )
+            print(
+                f"compact level={level} words={len((text or '').split())} reply={text!r}"
+            )
+            assert text and len(text.split()) <= 60, text
+        result = await session.run(
+            user_input="Now I'd like a detailed explanation of how wireless charging works, including the coils and where energy is lost."
+        )
+        text = (
+            result.expect.next_event()
+            .is_message(role="assistant")
+            .event()
+            .item.text_content
+        )
+        print(f"detail level={level} words={len((text or '').split())} reply={text!r}")
+        assert text and len(text.split()) > 50 and "coil" in text.lower(), text
+
+
+@pytest.mark.parametrize(
+    "message", ["How are you doing?", "Hey Diana!", "I finally finished that painting."]
+)
+async def test_background_time_and_location_stay_out_of_small_talk(message):
+    from datetime import datetime, timezone
+
+    from location_context import LocationContext
+    from time_context import TimeContext
+
+    clock = TimeContext(
+        {"timezone": {"mode": "manual", "name": "Asia/Tokyo"}},
+        now=lambda: datetime(2026, 9, 27, 16, 0, tzinfo=timezone.utc),
+    )
+    async with _judge_llm() as judge, AgentSession() as session:
+        await session.start(
+            Diana(
+                clock=clock,
+                location=LocationContext({"source": "manual", "city": "Tokyo, Japan"}),
+            )
+        )
+        result = await session.run(user_input=message)
+        reply = result.expect.next_event().is_message(role="assistant")
+        print(
+            f"background context input={message!r} reply={reply.event().item.text_content!r}"
+        )
+        await reply.judge(
+            judge,
+            intent=(
+                f"Responds naturally to the user's remark: {message!r}. "
+                "Does not mention or hint at the user's location, city, timezone, date, "
+                "local time or time of day. Does not ask about being up late, bedtime, "
+                "the user's morning/evening, or where they are. Does not steer the "
+                "conversation toward these background details or announce access to them."
+            ),
+        )
+        result.expect.no_more_events()

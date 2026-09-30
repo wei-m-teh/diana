@@ -65,7 +65,7 @@ def personality_instructions(traits: dict[str, int] | None) -> str:
     lines = [
         "\n\n# User-selected conversational style",
         "Apply these style preferences consistently, adapting to the situation. The numbers describe intensity, not abilities or a diagnosis.",
-        "Keep natural conversational turn-taking at every trait level. These preferences shape tone without imposing a sentence or word limit. Preserve accuracy, honesty, safety, privacy, respectful conduct, and the advice boundaries above.",
+        "Keep natural conversational turn-taking at every trait level. These preferences shape tone, not length. Keep the ordinary 30-50-word reply target at every trait level; simple exchanges can be shorter and explicit requests for detail can be longer. Preserve accuracy, honesty, safety, privacy, respectful conduct, and the advice boundaries above.",
         "Never invent memories, claim human feelings or needs, pressure the user into attachment, or exaggerate distress. Stay transparent about being AI when relevant.",
     ]
     for key in TRAIT_KEYS:

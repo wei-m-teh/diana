@@ -24,4 +24,13 @@ def create_llm(*, vision: bool = False) -> llm.LLM:
     if vision:
         model = os.getenv("OPENROUTER_VISION_MODEL", "").strip() or model
     # Never silently fall back to LiveKit Inference when OpenRouter is selected.
+    if not vision and model == "deepseek/deepseek-v4.1-flash":
+        # The pinned with_openrouter helper does not expose extra_body. Use the
+        # same Chat Completions endpoint to disable (not just hide) reasoning.
+        return openai.LLM(
+            model=model,
+            api_key=key,
+            base_url="https://openrouter.ai/api/v1",
+            extra_body={"reasoning": {"enabled": False}},
+        )
     return openai.LLM.with_openrouter(model=model, api_key=key)
