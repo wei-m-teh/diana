@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "date": "2026-09-30",
+  "scale": {
+    "1": "poor",
+    "2": "awkward",
+    "3": "acceptable",
+    "4": "good",
+    "5": "excellent"
+  },
+  "purpose": "User-supplied overall preference anchors for future judge evaluations; not per-dimension labels.",
+  "rules": [
+    "Assess whether a question fits the moment, not merely whether a question exists.",
+    "For example 3, the stated objection is asking who got the job; do not infer that all preceding wording was rejected.",
+    "For example 6, the stated objection is clinical phrasing; do not attribute its low score to the follow-up question.",
+    "Examples 1, 2, 4, and 5 have ratings but no user-provided explanations. Do not invent their reasons.",
+    "No suggested replacement replies have been approved by the user."
+  ],
+  "examples": [
+    {
+      "id": 1,
+      "history": [
+        {
+          "role": "user",
+          "content": "My cat has stolen my chair again."
+        },
+        {
+          "role": "assistant",
+          "content": "Apparently it’s the cat’s chair now."
+        }
+      ],
+      "user": "Usually I’d laugh, but I’m having a really rough day.",
+      "candidate": "I'm sorry. Want to tell me what's been going on?",
+      "user_overall_score": 3,
+      "user_explanation": null,
+      "source": {
+        "run": "20260930-additional-opus55",
+        "report": "44_humor_to_serious-reference_prefix-1.json",
+        "turn": 2
+      }
+    },
+    {
+      "id": 2,
+      "history": [
+        {
+          "role": "user",
+          "content": "I just need to complain for a minute. No advice, please."
+        },
+        {
+          "role": "assistant",
+          "content": "Go ahead, I'm listening."
+        }
+      ],
+      "user": "The train was late, then someone spilled coffee on my bag.",
+      "candidate": "Oh, that's a rough combination. Late train and then coffee all over your bag — was anything inside ruined?",
+      "user_overall_score": 3,
+      "user_explanation": null,
+      "source": {
+        "run": "20260930-additional-opus55",
+        "report": "16_vent_without_advice-rolling-1.json",
+        "turn": 2
+      }
+    },
+    {
+      "id": 3,
+      "history": [
+        {
+          "role": "user",
+          "content": "Didn’t get the job."
+        },
+        {
+          "role": "assistant",
+          "content": "Ah, I’m sorry. You wanted that one."
+        },
+        {
+          "role": "user",
+          "content": "Yeah. Thought the interview went well."
+        },
+        {
+          "role": "assistant",
+          "content": "That makes it harder. Did they tell you much?"
+        }
+      ],
+      "user": "Just the usual email.",
+      "candidate": "Ugh, the generic kind that says nothing. Those are the worst, because you're left filling in the blanks yourself. Have you got any idea who did get it?",
+      "user_overall_score": 2,
+      "user_explanation": "About asking who got the job",
+      "source": {
+        "run": "20260929T181546Z-2da6aa18",
+        "report": "07_job_disappointment-reference_prefix-1.json",
+        "turn": 3
+      }
+    },
+    {
+      "id": 4,
+      "history": [],
+      "user": "My brother’s visiting Friday. Sorry, Saturday.",
+      "candidate": "Oh, which day is it — Friday or Saturday? Good that you caught it, either way.",
+      "user_overall_score": 1,
+      "user_explanation": null,
+      "source": {
+        "run": "20260930-additional-opus55",
+        "report": "29_user_self_correction-rolling-1.json",
+        "turn": 1
+      }
+    },
+    {
+      "id": 5,
+      "history": [
+        {
+          "role": "user",
+          "content": "Right, I should get going."
+        },
+        {
+          "role": "assistant",
+          "content": "Okay. Take care of yourself out there."
+        }
+      ],
+      "user": "Wish me luck.",
+      "candidate": "Good luck. I hope it goes well.",
+      "user_overall_score": 4,
+      "user_explanation": null,
+      "source": {
+        "run": "20260929T181546Z-2da6aa18",
+        "report": "15_goodbye-rolling-1.json",
+        "turn": 2
+      }
+    },
+    {
+      "id": 6,
+      "history": [
+        {
+          "role": "user",
+          "content": "I passed the exam. Please don’t make a huge thing of it."
+        },
+        {
+          "role": "assistant",
+          "content": "Congrats. I'll keep it low-key then — just glad it went your way."
+        }
+      ],
+      "user": "Thank you. I’m mostly relieved.",
+      "candidate": "Relief makes sense. It's done, and you don't have to carry it around anymore. How are you planning to spend the rest of the day?",
+      "user_overall_score": 2,
+      "user_explanation": "Sounding clinical",
+      "source": {
+        "run": "20260930-additional-opus55",
+        "report": "42_match_low_key_celebration-rolling-1.json",
+        "turn": 2
+      }
+    }
+  ]
+}

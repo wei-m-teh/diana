@@ -101,6 +101,21 @@ Example review, **illustrative only—not executed**:
 
 ## Reports and human review
 
+### Saved user calibration
+
+[calibration.json](calibration.json) preserves the six user ratings (3, 3, 2, 1,
+4, 2), exact candidate replies, preceding dialogue and source references.
+The two explicit explanations are preserved: case 3 was disliked for asking who
+got the job; case 6 for sounding clinical. No reasons are invented for the other
+ratings, and no replacement replies are labeled as user-approved.
+
+Future evaluations automatically include this calibration in the judge context.
+These are overall preference ratings, not per-dimension scores. A question is
+judged by whether it fits the moment, not simply whether it exists. Each new report
+records the calibration version and hash. Earlier results remain unchanged;
+comparisons across this rubric change should be labeled accordingly. To compare
+agent revisions under calibrated judging, rerun both with the same calibration.
+
 Each scenario/mode/repeat writes JSON under `agent/eval-results/<run-id>/` when
 launched from `agent/`. Reports contain actual histories, references, candidate
 replies, word counts, generation durations, per-turn scores/evidence, failure
