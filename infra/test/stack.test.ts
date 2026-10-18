@@ -62,8 +62,21 @@ test(`deploys protected infrastructure with Google enabled=${googleEnabled}`, ()
       }),
     });
 
+    template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
+      RouteKey: "POST /attachments", AuthorizationType: "JWT", AuthorizationScopes: ["diana/sessions.create"],
+    });
+    template.hasResourceProperties("AWS::S3::Bucket", {
+      LifecycleConfiguration: { Rules: Match.arrayWith([Match.objectLike({ ExpirationInDays: 1 })]) },
+      Tags: Match.arrayWith([{Key:"application",Value:"conversation-agent"}]),
+    });
+    template.hasResourceProperties("AWS::DynamoDB::Table", {
+      TimeToLiveSpecification: { AttributeName: "expires", Enabled: true },
+    });
+    template.hasResourceProperties("AWS::ApiGatewayV2::Route", {
+      RouteKey: "POST /media", AuthorizationType: "JWT", AuthorizationScopes: ["diana/sessions.create"],
+    });
     template.resourceCountIs("AWS::Lambda::Url", 0);
-    template.resourceCountIs("AWS::DynamoDB::Table", 1);
+    template.resourceCountIs("AWS::DynamoDB::Table", 2);
     template.hasResource("AWS::DynamoDB::Table", {
       DeletionPolicy: "Retain", UpdateReplacePolicy: "Retain",
       Properties: Match.objectLike({
@@ -93,7 +106,7 @@ test(`deploys protected infrastructure with Google enabled=${googleEnabled}`, ()
         assert.ok(resource.Properties.SourceAccount);
         const source = JSON.stringify(resource.Properties.SourceArn);
         assert.equal(source.includes("*"), false);
-        assert.match(source, /\$default\/(POST\/sessions|GET\/me|PATCH\/me)/);
+        assert.match(source, /\$default\/(POST\/sessions|GET\/me|PATCH\/me|POST\/attachments|POST\/media)/);
       }
     }
     const profilePolicies = Object.entries(template.findResources("AWS::IAM::Policy"))
@@ -101,7 +114,7 @@ test(`deploys protected infrastructure with Google enabled=${googleEnabled}`, ()
     assert.equal(profilePolicies.length, 2);
     for (const [id, policy] of profilePolicies) {
       const statements = policy.Properties.PolicyDocument.Statement;
-      const database = statements.find((statement: any) => JSON.stringify(statement.Action).includes("dynamodb:"));
+      const database = statements.find((statement: any) => JSON.stringify(statement.Action).includes("dynamodb:") && JSON.stringify(statement.Resource).includes("Profiles"));
       assert.deepEqual(database.Action, ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"]);
       const location = statements.find((statement: any) => statement.Action === "geo-places:ReverseGeocode");
       if (id.startsWith("TokenFunction")) {
@@ -166,8 +179,8 @@ test("OpenRouter is injected only into the agent as a secret reference", () => {
     template.hasResourceProperties("AWS::ECS::TaskDefinition", {
       ContainerDefinitions: Match.arrayWith([Match.objectLike({
         Environment: Match.arrayWith([
-          { Name: "DIANA_LLM_PROVIDER", Value: "openrouter" },
           { Name: "DIANA_SPEECH_PROVIDER", Value: "openrouter" },
+          { Name: "DIANA_LLM_PROVIDER", Value: "openrouter" },
           { Name: "OPENROUTER_MODEL", Value: "vendor/chat" },
           { Name: "OPENROUTER_VISION_MODEL", Value: "vendor/vision" },
         ]),
@@ -190,4 +203,43 @@ test("incomplete OpenRouter deployment config is rejected", () => {
 test("OpenRouter speech requires credentials and rejects invalid providers", () => {
   assert.throws(() => new DianaStack(new App(), "SpeechNoKey", { speechProvider: "openrouter" }), /OpenRouter speech/);
   assert.throws(() => new DianaStack(new App(), "SpeechTypo", { speechProvider: "typo" }), /DIANA_SPEECH_PROVIDER/);
+});
+
+test("ElevenLabs voice output has an agent-only secret and independent STT", () => {
+  const directory = mkdtempSync(join(tmpdir(), "diana-elevenlabs-"));
+  try {
+    writeFileSync(join(directory, "index.html"), "<html>Diana</html>");
+    const elevenArn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:diana/elevenlabs-AbCdEf";
+    const template = Template.fromStack(new DianaStack(new App(), "ElevenTest", {
+      webAssetPath: directory,
+      secretArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:diana/livekit-AbCdEf",
+      openRouterSecretArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:diana/openrouter-AbCdEf",
+      openRouterModel: "vendor/chat", speechProvider: "openrouter",
+      ttsProvider: "elevenlabs", elevenLabsSecretArn: elevenArn, elevenLabsVoiceId: "voice-id",
+    }));
+    template.hasResourceProperties("AWS::ECS::TaskDefinition", {
+      ContainerDefinitions: Match.arrayWith([Match.objectLike({
+        Environment: Match.arrayWith([
+          { Name: "DIANA_SPEECH_PROVIDER", Value: "openrouter" },
+          { Name: "DIANA_TTS_PROVIDER", Value: "elevenlabs" },
+          { Name: "ELEVENLABS_VOICE_ID", Value: "voice-id" },
+          { Name: "ELEVENLABS_TTS_MODEL", Value: "eleven_v4" },
+        ]),
+        Secrets: Match.arrayWith([{ Name: "ELEVENLABS_API_KEY", ValueFrom: `${elevenArn}:ELEVENLABS_API_KEY::` }]),
+      })]),
+    });
+    for (const resource of Object.values(template.findResources("AWS::Lambda::Function"))) {
+      assert.ok(!JSON.stringify(resource).includes(elevenArn));
+      assert.ok(!JSON.stringify(resource).includes("ELEVENLABS_API_KEY"));
+    }
+    template.hasResourceProperties("AWS::ECS::Service", { PropagateTags: "SERVICE" });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("TTS configuration fails early for missing or inconsistent settings", () => {
+  assert.throws(() => new DianaStack(new App(), "TTSBadProvider", { ttsProvider: "typo" }), /DIANA_TTS_PROVIDER/);
+  assert.throws(() => new DianaStack(new App(), "ElevenNoKey", { ttsProvider: "elevenlabs", elevenLabsVoiceId: "voice-id" }), /ELEVENLABS_SECRET_ARN/);
+  assert.throws(() => new DianaStack(new App(), "ElevenNoVoice", { ttsProvider: "elevenlabs", elevenLabsSecretArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:diana/elevenlabs-AbCdEf" }), /ELEVENLABS_VOICE_ID/);
+  assert.throws(() => new DianaStack(new App(), "TTSNoRouterKey", { ttsProvider: "openrouter" }), /OpenRouter speech/);
+  assert.throws(() => new DianaStack(new App(), "TTSNoVoice", { openRouterTtsModel: "vendor/tts" }), /OPENROUTER_TTS_VOICE/);
 });

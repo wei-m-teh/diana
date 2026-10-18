@@ -8,6 +8,12 @@ import os
 from livekit.agents import inference, llm
 from livekit.plugins import openai
 
+from connection_warmup import OpenRouterWarmupMixin
+
+
+class WarmOpenRouterLLM(OpenRouterWarmupMixin, openai.LLM):
+    pass
+
 
 def create_llm(*, vision: bool = False) -> llm.LLM:
     provider = os.getenv("DIANA_LLM_PROVIDER", "livekit").strip().lower()
@@ -27,10 +33,12 @@ def create_llm(*, vision: bool = False) -> llm.LLM:
     if not vision and model == "deepseek/deepseek-v4.1-flash":
         # The pinned with_openrouter helper does not expose extra_body. Use the
         # same Chat Completions endpoint to disable (not just hide) reasoning.
-        return openai.LLM(
+        return WarmOpenRouterLLM(
             model=model,
             api_key=key,
             base_url="https://openrouter.ai/api/v1",
             extra_body={"reasoning": {"enabled": False}},
         )
-    return openai.LLM.with_openrouter(model=model, api_key=key)
+    return WarmOpenRouterLLM(
+        model=model, api_key=key, base_url="https://openrouter.ai/api/v1"
+    )

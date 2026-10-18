@@ -1,14 +1,17 @@
 'use client';
 
-import { createContext, useContext, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Track } from 'livekit-client';
 import {
   AudioTrack,
   type RoomAudioRendererProps,
   type TrackReference,
+  useEnsureRoom,
   useTracks,
 } from '@livekit/components-react';
+import { useMedia } from '@/components/app/media';
+import { attachAudioResume } from '@/lib/audio-resume';
 
 type Failure = { time: string; track: string; code: number; message: string; attempt: number };
 const RecoveryContext = createContext<{
@@ -82,6 +85,10 @@ function RecoveringTrack({
 
 export function ResilientAudioRenderer({ room, volume, muted }: RoomAudioRendererProps) {
   const { generation } = useAudioRecovery();
+  const { videoOpen } = useMedia();
+  const ensuredRoom = useEnsureRoom(room);
+  const paused = !!muted || videoOpen;
+  useEffect(() => attachAudioResume(ensuredRoom, () => paused), [ensuredRoom, paused]);
   const tracks = useTracks(
     [Track.Source.Microphone, Track.Source.ScreenShareAudio, Track.Source.Unknown],
     { updateOnlyOn: [], onlySubscribed: true, room }
@@ -94,7 +101,7 @@ export function ResilientAudioRenderer({ room, volume, muted }: RoomAudioRendere
           key={`${trackRef.participant.identity}:${trackRef.publication.trackSid}:${generation}`}
           trackRef={trackRef}
           volume={volume}
-          muted={muted}
+          muted={muted || videoOpen}
         />
       ))}
     </div>

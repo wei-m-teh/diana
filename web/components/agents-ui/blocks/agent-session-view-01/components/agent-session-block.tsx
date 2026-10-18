@@ -1,21 +1,27 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Track } from 'livekit-client';
 import { AnimatePresence, type MotionProps, motion } from 'motion/react';
 import {
-  useAgent,
+  VideoTrack,
   useLocalParticipant,
   useSessionContext,
   useSessionMessages,
+  useVoiceAssistant,
 } from '@livekit/components-react';
-import { AgentChatTranscript } from '@/components/agents-ui/agent-chat-transcript';
+import { AgentAudioVisualizerBar } from '@/components/agents-ui/agent-audio-visualizer-bar';
 import {
   AgentControlBar,
   type AgentControlBarControls,
 } from '@/components/agents-ui/agent-control-bar';
 import { Shimmer } from '@/components/ai-elements/shimmer';
+import { Attachments } from '@/components/app/attachments';
+import { useSearchSources } from '@/components/app/conversation-context';
+import { ConversationResults } from '@/components/app/conversation-results';
+import { useMedia } from '@/components/app/media';
 import { cn } from '@/lib/shadcn/utils';
-import { TileLayout } from './tile-view';
+import { TileLayout, useLocalTrackRef } from './tile-view';
 
 const MotionMessage = motion.create(Shimmer);
 
@@ -38,29 +44,6 @@ const BOTTOM_VIEW_MOTION_PROPS: MotionProps = {
     delay: 0.5,
     ease: 'easeOut',
   },
-};
-
-const CHAT_MOTION_PROPS: MotionProps = {
-  variants: {
-    hidden: {
-      opacity: 0,
-      transition: {
-        ease: 'easeOut',
-        duration: 0.3,
-      },
-    },
-    visible: {
-      opacity: 1,
-      transition: {
-        delay: 0.2,
-        ease: 'easeOut',
-        duration: 0.3,
-      },
-    },
-  },
-  initial: 'hidden',
-  animate: 'visible',
-  exit: 'hidden',
 };
 
 const SHIMMER_MOTION_PROPS: MotionProps = {
@@ -182,14 +165,48 @@ export function AgentSessionView_01({
 }: React.ComponentProps<'section'> & AgentSessionView_01Props) {
   const session = useSessionContext();
   const { isCameraEnabled } = useLocalParticipant();
+  const cameraTrack = useLocalTrackRef(Track.Source.Camera);
   const [deviceError, setDeviceError] = useState(false);
   // LiveKit keys device-list subscriptions on this callback. Keep it stable
   // while streaming transcripts update the session view.
   const handleDeviceError = useCallback(() => setDeviceError(true), []);
   const { messages } = useSessionMessages(session);
   const [chatOpen, setChatOpen] = useState(false);
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const { state: agentState } = useAgent();
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const toggleTranscript = useCallback((open: boolean) => {
+    setTranscriptOpen(open);
+    if (open) setChatOpen(true);
+  }, []);
+  const { state: agentState, audioTrack } = useVoiceAssistant();
+  const { cards } = useMedia();
+  const results = useSearchSources();
+  const arrivals =
+    cards
+      .map((c) => c.id)
+      .sort()
+      .join('|') +
+    results
+      .map((r) => r.id)
+      .sort()
+      .join('|');
+  const previousArrivals = useRef(arrivals);
+  useEffect(() => {
+    if (arrivals !== previousArrivals.current) setChatOpen(true);
+    previousArrivals.current = arrivals;
+  }, [arrivals]);
+  const stateLabel = session.isConnected
+    ? ({
+        speaking: 'Speaking',
+        thinking: 'Thinking',
+        listening: 'Listening',
+        idle: 'Ready',
+        initializing: 'Connecting',
+        connecting: 'Connecting',
+        disconnected: 'Disconnected',
+        'pre-connect-buffering': 'Connecting',
+        failed: 'Connection failed',
+      }[agentState] ?? 'Connecting')
+    : 'Reconnecting';
 
   const controls: AgentControlBarControls = {
     leave: true,
@@ -199,60 +216,82 @@ export function AgentSessionView_01({
     screenShare: supportsScreenShare,
   };
 
-  useEffect(() => {
-    const lastMessage = messages.at(-1);
-    const lastMessageIsLocal = lastMessage?.from?.isLocal === true;
-
-    if (scrollAreaRef.current && lastMessageIsLocal) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
-    }
-  }, [messages]);
-
   return (
     <section
       ref={ref}
-      className={cn('bg-background relative z-10 h-full w-full overflow-hidden', className)}
+      className={cn(
+        'bg-background relative z-10 flex h-full w-full flex-col overflow-hidden',
+        className
+      )}
       {...props}
     >
-      <Fade top className="absolute inset-x-4 top-0 z-10 h-40" />
-      {/* transcript */}
-
-      <div className="absolute top-0 bottom-[135px] flex w-full flex-col md:bottom-[170px]">
-        <AnimatePresence>
-          {chatOpen && (
-            <motion.div
-              {...CHAT_MOTION_PROPS}
-              className="flex h-full w-full flex-col gap-4 space-y-3 transition-opacity duration-300 ease-out"
-            >
-              <AgentChatTranscript
-                agentState={agentState}
-                messages={messages}
-                className="mx-auto w-full max-w-2xl [&_.is-user>div]:rounded-[22px] [&>div>div]:px-4 [&>div>div]:pt-40 md:[&>div>div]:px-6"
-              />
-            </motion.div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <header className="bg-background z-10 flex min-h-16 shrink-0 items-center justify-between gap-3 border-b px-4 md:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            {chatOpen && (
+              <div className="h-8 w-10 shrink-0" aria-hidden="true">
+                <AgentAudioVisualizerBar
+                  state={agentState}
+                  audioTrack={audioTrack}
+                  barCount={5}
+                  className="h-full w-full gap-1"
+                />
+              </div>
+            )}
+            <div>
+              <p className="font-medium">Diana</p>
+              <p className="text-muted-foreground text-xs" role="status">
+                {stateLabel}
+              </p>
+            </div>
+          </div>
+          {chatOpen && isCameraEnabled && cameraTrack && (
+            <VideoTrack trackRef={cameraTrack} className="h-12 w-12 rounded-lg object-cover" />
           )}
-        </AnimatePresence>
+          <button
+            type="button"
+            className="min-h-11 rounded-full border px-4 text-sm"
+            onClick={() => {
+              setChatOpen(!chatOpen);
+              if (chatOpen) setTranscriptOpen(false);
+            }}
+          >
+            {chatOpen ? 'Back to voice' : 'Conversation'}
+          </button>
+        </header>
+        <div className="relative min-h-0 flex-1">
+          <div className={cn('h-full', !chatOpen && 'hidden')} aria-hidden={!chatOpen}>
+            <ConversationResults
+              messages={transcriptOpen ? messages : []}
+              visible={chatOpen}
+              showTranscript={transcriptOpen}
+            />
+          </div>
+          {!chatOpen && (
+            <div className="absolute inset-0">
+              <TileLayout
+                chatOpen={false}
+                audioVisualizerType={audioVisualizerType}
+                audioVisualizerColor={audioVisualizerColor}
+                audioVisualizerColorShift={audioVisualizerColorShift}
+                audioVisualizerBarCount={audioVisualizerBarCount}
+                audioVisualizerRadialBarCount={audioVisualizerRadialBarCount}
+                audioVisualizerRadialRadius={audioVisualizerRadialRadius}
+                audioVisualizerGridRowCount={audioVisualizerGridRowCount}
+                audioVisualizerGridColumnCount={audioVisualizerGridColumnCount}
+                audioVisualizerWaveLineWidth={audioVisualizerWaveLineWidth}
+              />
+            </div>
+          )}
+        </div>
       </div>
-      {/* Tile layout */}
-      <TileLayout
-        chatOpen={chatOpen}
-        audioVisualizerType={audioVisualizerType}
-        audioVisualizerColor={audioVisualizerColor}
-        audioVisualizerColorShift={audioVisualizerColorShift}
-        audioVisualizerBarCount={audioVisualizerBarCount}
-        audioVisualizerRadialBarCount={audioVisualizerRadialBarCount}
-        audioVisualizerRadialRadius={audioVisualizerRadialRadius}
-        audioVisualizerGridRowCount={audioVisualizerGridRowCount}
-        audioVisualizerGridColumnCount={audioVisualizerGridColumnCount}
-        audioVisualizerWaveLineWidth={audioVisualizerWaveLineWidth}
-      />
       {/* Bottom */}
       <motion.div
         {...BOTTOM_VIEW_MOTION_PROPS}
-        className="absolute inset-x-3 bottom-0 z-50 md:inset-x-12"
+        className="bg-background z-50 shrink-0 border-t px-3 pt-2 pb-[env(safe-area-inset-bottom)] md:px-6"
       >
         {/* Pre-connect message */}
-        {isPreConnectBufferEnabled && (
+        {isPreConnectBufferEnabled && !chatOpen && (
           <AnimatePresence>
             {messages.length === 0 && (
               <MotionMessage
@@ -267,7 +306,7 @@ export function AgentSessionView_01({
             )}
           </AnimatePresence>
         )}
-        <div className="bg-background relative mx-auto max-w-2xl pb-3 md:pb-12">
+        <div className="bg-background relative mx-auto max-w-2xl pb-3 md:pb-4">
           <Fade bottom className="absolute inset-x-0 top-0 h-4 -translate-y-full" />
           {supportsVideoInput && (
             <p role="status" className="mb-2 text-center text-sm">
@@ -285,14 +324,15 @@ export function AgentSessionView_01({
               Unable to access the device. Check browser permissions and try again.
             </p>
           )}
+          <Attachments />
           <AgentControlBar
             saveUserChoices={false}
             onDeviceError={handleDeviceError}
             variant="livekit"
             controls={controls}
-            isChatOpen={chatOpen}
+            isChatOpen={transcriptOpen}
             isConnected={session.isConnected}
-            onIsChatOpenChange={setChatOpen}
+            onIsChatOpenChange={toggleTranscript}
           />
         </div>
       </motion.div>

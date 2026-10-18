@@ -24,7 +24,7 @@ type Sample = {
   }[];
 };
 
-export function SoundCheck() {
+export function SoundCheck({ inline = false }: { inline?: boolean }) {
   const recovery = useAudioRecovery();
   const { room, isConnected } = useSessionContext();
   const [open, setOpen] = useState(false);
@@ -147,7 +147,9 @@ export function SoundCheck() {
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
-      <Dialog.Trigger className="bg-background fixed top-20 left-4 z-[55] rounded-lg border px-3 py-2 text-sm">
+      <Dialog.Trigger
+        className={`bg-background rounded-lg border px-3 py-2 text-sm ${inline ? 'shrink-0' : 'fixed top-20 left-4 z-[55]'}`}
+      >
         Sound check
       </Dialog.Trigger>
       <Dialog.Portal>

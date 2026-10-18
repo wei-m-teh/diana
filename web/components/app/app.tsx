@@ -115,23 +115,29 @@ function ConversationSession({
   return (
     <AgentSessionProvider session={session}>
       <AppSetup />
-      <SoundCheck />
-      {process.env.NEXT_PUBLIC_DIANA_STATIC === '1' && (
-        <div className="fixed top-4 right-4 z-50 flex gap-2">
-          <button className="rounded-full border px-4 py-2" onClick={onOpenProfile}>
-            Profile / Settings
-          </button>
-          <button
-            className="rounded-full border px-4 py-2"
-            onClick={() => {
-              recordSessionDiagnostic('sign-out-clicked');
-              void session.end().finally(() => signOut());
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      )}
+      <div className="bg-background fixed inset-x-3 top-4 z-50 flex items-center justify-between gap-2">
+        <SoundCheck inline />
+        {process.env.NEXT_PUBLIC_DIANA_STATIC === '1' && (
+          <div className="flex gap-2">
+            <button
+              aria-label="Profile / Settings"
+              className="rounded-full border px-3 py-2"
+              onClick={onOpenProfile}
+            >
+              <span className="hidden sm:inline">Profile / </span>Settings
+            </button>
+            <button
+              className="rounded-full border px-4 py-2"
+              onClick={() => {
+                recordSessionDiagnostic('sign-out-clicked');
+                void session.end().finally(() => signOut());
+              }}
+            >
+              Sign out
+            </button>
+          </div>
+        )}
+      </div>
       <main className="grid h-svh grid-cols-1 place-content-center">
         <ViewController appConfig={appConfig} />
       </main>

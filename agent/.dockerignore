@@ -3,6 +3,7 @@ test/
 tests/
 eval/
 evals/
+eval-results/
 
 # Python bytecode and artifacts
 __pycache__/

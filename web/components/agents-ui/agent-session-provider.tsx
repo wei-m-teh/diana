@@ -6,6 +6,7 @@ import {
   type UseSessionReturn,
 } from '@livekit/components-react';
 import { ConversationContext } from '@/components/app/conversation-context';
+import { MediaProvider } from '@/components/app/media';
 import { AudioRecoveryProvider, ResilientAudioRenderer } from './resilient-audio';
 
 /**
@@ -55,12 +56,14 @@ export function AgentSessionProvider({
 }: AgentSessionProviderProps) {
   return (
     <SessionProvider session={session}>
-      <ConversationContext>
-        <AudioRecoveryProvider>
-          {children}
-          <ResilientAudioRenderer {...roomAudioRendererProps} />
-        </AudioRecoveryProvider>
-      </ConversationContext>
+      <MediaProvider>
+        <ConversationContext>
+          <AudioRecoveryProvider>
+            {children}
+            <ResilientAudioRenderer {...roomAudioRendererProps} />
+          </AudioRecoveryProvider>
+        </ConversationContext>
+      </MediaProvider>
     </SessionProvider>
   );
 }

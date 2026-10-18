@@ -31,7 +31,7 @@ def test_openrouter_routes_both_paths(monkeypatch, vision, expected):
     monkeypatch.setenv("OPENROUTER_MODEL", "vendor/chat")
     monkeypatch.setenv("OPENROUTER_VISION_MODEL", "vendor/vision")
     with (
-        patch("model_provider.openai.LLM.with_openrouter") as factory,
+        patch("model_provider.WarmOpenRouterLLM") as factory,
         patch("model_provider.inference.LLM") as livekit,
     ):
         assert create_llm(vision=vision) is factory.return_value
@@ -44,7 +44,7 @@ def test_vision_defaults_to_selected_model(monkeypatch):
     monkeypatch.setenv("DIANA_LLM_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.setenv("OPENROUTER_MODEL", "vendor/multimodal")
-    with patch("model_provider.openai.LLM.with_openrouter") as factory:
+    with patch("model_provider.WarmOpenRouterLLM") as factory:
         create_llm(vision=True)
         assert factory.call_args.kwargs["model"] == "vendor/multimodal"
 
@@ -119,8 +119,10 @@ def test_deepseek_vision_keeps_existing_reasoning_default(monkeypatch):
     monkeypatch.setenv("DIANA_LLM_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.setenv("OPENROUTER_MODEL", "deepseek/deepseek-v4.1-flash")
-    with patch("model_provider.openai.LLM.with_openrouter") as factory:
+    with patch("model_provider.WarmOpenRouterLLM") as factory:
         create_llm(vision=True)
         factory.assert_called_once_with(
-            model="deepseek/deepseek-v4.1-flash", api_key="test-key"
+            model="deepseek/deepseek-v4.1-flash",
+            api_key="test-key",
+            base_url="https://openrouter.ai/api/v1",
         )

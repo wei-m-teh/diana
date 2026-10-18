@@ -1,3 +1,4 @@
+import { registerAttachmentSession } from "./attachments";
 import { parseLocationFix, locationPreference, type LocationFix } from "../../web/lib/location";
 import { lookupCity, sessionLocation } from "./location";
 import { resolveTimezone, validTimezone } from "../../web/lib/timezone";
@@ -48,7 +49,7 @@ async function credentials(): Promise<LiveKitCredentials> {
 }
 
 // Dependency injection keeps token permissions testable without AWS credentials.
-export function createHandler(loadCredentials = credentials, ensureProfile: (user: UserIdentity) => Promise<UserProfile | void> = profileStore.ensure, saveLocation = profileStore.recordLocation, geocode = lookupCity) {
+export function createHandler(loadCredentials = credentials, ensureProfile: (user: UserIdentity) => Promise<UserProfile | void> = profileStore.ensure, saveLocation = profileStore.recordLocation, geocode = lookupCity, registerUploads = registerAttachmentSession) {
   return async (
     event: APIGatewayProxyEventV2WithJWTAuthorizer,
   ): Promise<APIGatewayProxyStructuredResultV2> => {
@@ -105,6 +106,7 @@ export function createHandler(loadCredentials = credentials, ensureProfile: (use
 
       const config = await loadCredentials();
       const roomName = `diana_${randomUUID()}`;
+      if (isWeb) await registerUploads(roomName, user.sub);
       const participantIdentity = `user_${user.sub}_${randomUUID()}`;
       const metadata = JSON.stringify({
         participantIdentity,
