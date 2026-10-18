@@ -109,3 +109,72 @@ A temporary LiveKit room tested the deployed agent (and was deleted afterward):
 This verifies the server media path, not phone-specific playback, network
 conditions or interruption latency. Test with Delia or another Deepgram voice;
 the premium voice routes remain on LiveKit Inference.
+
+## Select voice output independently (ElevenLabs v4 or OpenRouter)
+
+`DIANA_SPEECH_PROVIDER` still controls speech recognition. The optional
+`DIANA_TTS_PROVIDER` overrides **output only**, with `livekit`, `openrouter`, or
+`elevenlabs`. Leave it blank to preserve existing routing, including legacy
+premium-voice routing through LiveKit. Changing TTS does not change the LLM,
+transcription, authentication, or media transport.
+
+For direct ElevenLabs v4, add to ignored `agent/.env.local` for local use:
+
+```dotenv
+DIANA_SPEECH_PROVIDER=openrouter
+DIANA_TTS_PROVIDER=elevenlabs
+ELEVENLABS_API_KEY=your-elevenlabs-key
+ELEVENLABS_VOICE_ID=your-elevenlabs-voice-id
+ELEVENLABS_TTS_MODEL=eleven_v4
+```
+
+Choose a voice ID available to your ElevenLabs account, not a Deepgram name such
+as `delia`. This configuration uses **one deployment-wide voice**: the saved
+web/Android voice choice remains saved but is overridden while direct ElevenLabs
+is selected. It does not add an ElevenLabs voice browser to the UI.
+
+For AWS, store `{"ELEVENLABS_API_KEY":"..."}` in a dedicated secret named
+`diana/elevenlabs`, tagged `application=conversation-agent`. Use the EC2 instance
+profile when creating it. Set `ELEVENLABS_SECRET_ARN`, `ELEVENLABS_VOICE_ID`,
+`ELEVENLABS_TTS_MODEL=eleven_v4`, and `DIANA_TTS_PROVIDER=elevenlabs` in ignored
+`infra/.env`. Do not put the raw key there or in frontend/mobile files. CDK injects
+only the secret reference into ECS and grants secret access to its execution
+role. The key is not sent to OpenRouter or either Lambda. Existing stack-wide
+cost tags and ECS service tag propagation remain intact. Missing credentials or
+voice IDs fail configuration; there is no silent change to another provider.
+
+The direct adapter uses ElevenLabs' documented
+[HTTP stream endpoint](https://elevenlabs.io/docs/api-reference/text-to-speech/stream)
+with model `eleven_v4` and mono `pcm_24000`. Audio frames are emitted as bytes
+arrive. LiveKit segments LLM text before synthesis because this is HTTP audio
+streaming, not a persistent text-input WebSocket. It avoids the older TTS
+WebSocket path, which does not serve v4 dialogue; see
+[ElevenLabs streaming choices](https://elevenlabs.io/docs/eleven-api/guides/how-to/websockets/tts-vs-ttd-websockets).
+Sentence segmentation can affect latency and prosody: real voice quality and
+latency must be measured after an ElevenLabs key and voice are supplied. The
+adapter passes text through unchanged, but this change does not make Diana
+insert emotional tags automatically; her existing spoken-output rules remain.
+ElevenLabs calls are billed directly by ElevenLabs, separately from OpenRouter.
+
+To switch back to OpenRouter and the existing Deepgram choices:
+
+```dotenv
+DIANA_SPEECH_PROVIDER=openrouter
+DIANA_TTS_PROVIDER=openrouter
+OPENROUTER_TTS_MODEL=
+OPENROUTER_TTS_VOICE=
+```
+
+With explicit `openrouter`, an incompatible premium catalog voice is rejected
+rather than silently using LiveKit. Leaving `DIANA_TTS_PROVIDER` blank restores
+legacy behavior. To try a different OpenRouter voice model, set both
+`OPENROUTER_TTS_MODEL` and `OPENROUTER_TTS_VOICE` to the exact provider IDs in
+`agent/.env.local` (local) or `infra/.env` (AWS). The existing OpenRouter key is
+used. This is also a deployment-wide override of the saved voice selection.
+The selected model must support OpenRouter's `/audio/speech` API and MP3 output;
+provider-specific options, custom voice cloning and model availability are not
+validated by the configuration tests. Consult the
+[OpenRouter TTS catalog](https://openrouter.ai/api/v1/models?output_modalities=speech).
+
+Provider changes in AWS require CDK deployment and a new conversation. The code
+addition alone does not change the live provider, create a secret, or deploy.

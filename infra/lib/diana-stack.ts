@@ -32,6 +32,14 @@ export interface DianaStackProps extends StackProps {
   openRouterModel?: string;
   openRouterVisionModel?: string;
   speechProvider?: string;
+  ttsProvider?: string;
+  imageGenerationModel?: string;
+  videoGenerationModel?: string;
+  elevenLabsSecretArn?: string;
+  elevenLabsVoiceId?: string;
+  elevenLabsTtsModel?: string;
+  openRouterTtsModel?: string;
+  openRouterTtsVoice?: string;
   googleClientId?: string;
   googleSecretArn?: string;
   desiredCount?: number;
@@ -55,9 +63,24 @@ export class DianaStack extends Stack {
     if (props.speechProvider && !["livekit", "openrouter"].includes(props.speechProvider)) {
       throw new Error("DIANA_SPEECH_PROVIDER must be livekit or openrouter");
     }
-    if (props.speechProvider === "openrouter" && !props.openRouterSecretArn) {
+    if (props.ttsProvider && !["livekit", "openrouter", "elevenlabs"].includes(props.ttsProvider)) {
+      throw new Error("DIANA_TTS_PROVIDER must be livekit, openrouter or elevenlabs");
+    }
+    if (Boolean(props.openRouterTtsModel) !== Boolean(props.openRouterTtsVoice)) {
+      throw new Error("Set both OPENROUTER_TTS_MODEL and OPENROUTER_TTS_VOICE");
+    }
+    if (props.ttsProvider === "elevenlabs") {
+      if (!props.elevenLabsSecretArn) throw new Error("ELEVENLABS_SECRET_ARN is required");
+      if (!props.elevenLabsVoiceId || !/^[A-Za-z0-9_-]+$/.test(props.elevenLabsVoiceId)) {
+        throw new Error("ELEVENLABS_VOICE_ID must be a provider voice ID");
+      }
+    }
+    if ((props.speechProvider === "openrouter" || props.ttsProvider === "openrouter") && !props.openRouterSecretArn) {
       throw new Error("OpenRouter speech requires OPENROUTER_SECRET_ARN");
     }
+    const elevenLabsSecret = props.ttsProvider === "elevenlabs"
+      ? secretsmanager.Secret.fromSecretCompleteArn(this, "ElevenLabsCredentials", props.elevenLabsSecretArn!)
+      : undefined;
     const openRouterSecret = props.openRouterSecretArn
       ? secretsmanager.Secret.fromSecretCompleteArn(this, "OpenRouterCredentials", props.openRouterSecretArn)
       : undefined;
@@ -182,6 +205,19 @@ export class DianaStack extends Stack {
     const mobileLogout = "com.diana.app:/signout";
     const mobileClient = createClient("MobileClient", mobileCallback, mobileLogout);
 
+    const attachmentsBucket = new s3.Bucket(this, "Attachments", {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED, enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [{ expiration: Duration.days(1), abortIncompleteMultipartUploadAfter: Duration.days(1) }],
+      cors: [{ allowedOrigins: [websiteUrl], allowedMethods: [s3.HttpMethods.POST, s3.HttpMethods.GET, s3.HttpMethods.HEAD], allowedHeaders: ["*"], maxAge: 300 }],
+    });
+    const attachmentsTable = new dynamodb.Table(this, "AttachmentsTable", {
+      partitionKey: { name: "room", type: dynamodb.AttributeType.STRING },
+      sortKey: { name: "id", type: dynamodb.AttributeType.STRING },
+      timeToLiveAttribute: "expires", billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED, removalPolicy: RemovalPolicy.RETAIN,
+    });
     const profiles = new dynamodb.Table(this, "Profiles", {
       partitionKey: { name: "userId", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
@@ -221,6 +257,18 @@ export class DianaStack extends Stack {
       environment: { LIVEKIT_SECRET_ARN: secret.secretArn, ...profileEnvironment },
       bundling: { minify: true, sourceMap: true, externalModules: [] },
     });
+    tokenFunction.addEnvironment("ATTACHMENTS_TABLE", attachmentsTable.tableName);
+    attachmentsTable.grant(tokenFunction, "dynamodb:PutItem");
+    const attachmentsFunction = new nodejs.NodejsFunction(this, "AttachmentsFunction", {
+      entry: join(root, "infra/lambda/attachments.ts"), depsLockFilePath: join(root, "infra/package-lock.json"),
+      runtime: lambda.Runtime.NODEJS_22_X, architecture: lambda.Architecture.ARM_64,
+      memorySize: 256, timeout: Duration.seconds(15),
+      logGroup: new logs.LogGroup(this, "AttachmentsLogs", { retention: logs.RetentionDays.ONE_MONTH }),
+      environment: { ...profileEnvironment, ATTACHMENTS_TABLE: attachmentsTable.tableName, ATTACHMENTS_BUCKET: attachmentsBucket.bucketName },
+      bundling: { minify: true, sourceMap: true, externalModules: [] },
+    });
+    attachmentsTable.grant(attachmentsFunction, "dynamodb:PutItem", "dynamodb:UpdateItem");
+    attachmentsBucket.grantPut(attachmentsFunction, "uploads/*");
     secret.grantRead(tokenFunction);
     profiles.grant(tokenFunction, "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem");
     tokenFunction.addToRolePolicy(new iam.PolicyStatement({
@@ -278,6 +326,41 @@ export class DianaStack extends Stack {
       principal: "apigateway.amazonaws.com", sourceAccount: this.account,
       sourceArn: `arn:${this.partition}:execute-api:${this.region}:${this.account}:${api.ref}/$default/POST/sessions`,
     });
+    const attachmentsIntegration = new apigateway.CfnIntegration(this, "AttachmentsIntegration", {
+      apiId: api.ref, integrationType: "AWS_PROXY", integrationUri: attachmentsFunction.functionArn,
+      payloadFormatVersion: "2.0", timeoutInMillis: 15000,
+    });
+    new apigateway.CfnRoute(this, "AttachmentsRoute", {
+      apiId: api.ref, routeKey: "POST /attachments", authorizationType: "JWT",
+      authorizerId: authorizer.ref, authorizationScopes: [sessionScopeName], target: `integrations/${attachmentsIntegration.ref}`,
+    });
+    new lambda.CfnPermission(this, "ApiInvokeAttachments", {
+      functionName: attachmentsFunction.functionArn, action: "lambda:InvokeFunction",
+      principal: "apigateway.amazonaws.com", sourceAccount: this.account,
+      sourceArn: `arn:${this.partition}:execute-api:${this.region}:${this.account}:${api.ref}/$default/POST/attachments`,
+    });
+    const mediaFunction = new nodejs.NodejsFunction(this, "MediaFunction", {
+      entry: join(root, "infra/lambda/media.ts"), depsLockFilePath: join(root, "infra/package-lock.json"),
+      runtime: lambda.Runtime.NODEJS_22_X, architecture: lambda.Architecture.ARM_64,
+      memorySize: 256, timeout: Duration.seconds(15),
+      logGroup: new logs.LogGroup(this, "MediaLogs", { retention: logs.RetentionDays.ONE_MONTH }),
+      environment: { ...profileEnvironment, ATTACHMENTS_TABLE: attachmentsTable.tableName, ATTACHMENTS_BUCKET: attachmentsBucket.bucketName },
+      bundling: { minify: true, sourceMap: true, externalModules: [] },
+    });
+    attachmentsTable.grant(mediaFunction, "dynamodb:GetItem");
+    attachmentsBucket.grantRead(mediaFunction, "uploads/*");
+    attachmentsBucket.grantRead(mediaFunction, "generated/*");
+    const mediaIntegration = new apigateway.CfnIntegration(this, "MediaIntegration", {
+      apiId: api.ref, integrationType: "AWS_PROXY", integrationUri: mediaFunction.functionArn, payloadFormatVersion: "2.0",
+    });
+    new apigateway.CfnRoute(this, "MediaRoute", {
+      apiId: api.ref, routeKey: "POST /media", authorizationType: "JWT", authorizerId: authorizer.ref,
+      authorizationScopes: [sessionScopeName], target: `integrations/${mediaIntegration.ref}`,
+    });
+    new lambda.CfnPermission(this, "ApiInvokeMedia", {
+      functionName: mediaFunction.functionArn, action: "lambda:InvokeFunction", principal: "apigateway.amazonaws.com",
+      sourceAccount: this.account, sourceArn: `arn:${this.partition}:execute-api:${this.region}:${this.account}:${api.ref}/$default/POST/media`,
+    });
     const tokenEndpoint = `${api.attrApiEndpoint}/sessions`;
     new deployment.BucketDeployment(this, "PublishWebsite", {
       destinationBucket: bucket,
@@ -313,6 +396,9 @@ export class DianaStack extends Stack {
         operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
       },
     });
+    attachmentsBucket.grantRead(task.taskRole, "uploads/*");
+    attachmentsTable.grant(task.taskRole, "dynamodb:GetItem", "dynamodb:PutItem");
+    attachmentsBucket.grantPut(task.taskRole, "generated/*");
     const agentLogs = new logs.LogGroup(this, "AgentLogs", {
       retention: logs.RetentionDays.ONE_MONTH,
     });
@@ -323,15 +409,31 @@ export class DianaStack extends Stack {
       // Run Python directly so SIGTERM reaches the worker (instead of an uv parent).
       command: ["/app/.venv/bin/python", "src/agent.py", "start"],
       environment: {
+        ATTACHMENTS_BUCKET: attachmentsBucket.bucketName,
+        ATTACHMENTS_TABLE: attachmentsTable.tableName,
         PYTHONUNBUFFERED: "1",
+        DIANA_SPEECH_PROVIDER: props.speechProvider ?? "livekit",
+        ...(props.ttsProvider ? { DIANA_TTS_PROVIDER: props.ttsProvider } : {}),
+        ...(elevenLabsSecret ? {
+          ELEVENLABS_VOICE_ID: props.elevenLabsVoiceId!,
+          ELEVENLABS_TTS_MODEL: props.elevenLabsTtsModel ?? "eleven_v4",
+        } : {}),
+        ...(props.openRouterTtsModel ? {
+          OPENROUTER_TTS_MODEL: props.openRouterTtsModel,
+          OPENROUTER_TTS_VOICE: props.openRouterTtsVoice!,
+        } : {}),
         ...(openRouterSecret ? {
           DIANA_LLM_PROVIDER: "openrouter",
-          DIANA_SPEECH_PROVIDER: props.speechProvider ?? "livekit",
           OPENROUTER_MODEL: props.openRouterModel!,
+          DIANA_IMAGE_MODEL: props.imageGenerationModel ?? "google/gemini-2.5-flash-image",
+          DIANA_VIDEO_MODEL: props.videoGenerationModel ?? "x-ai/grok-imagine-video",
           OPENROUTER_VISION_MODEL: props.openRouterVisionModel ?? props.openRouterModel!,
         } : {}),
       },
       secrets: {
+        ...(elevenLabsSecret ? {
+          ELEVENLABS_API_KEY: ecs.Secret.fromSecretsManager(elevenLabsSecret, "ELEVENLABS_API_KEY"),
+        } : {}),
         ...(openRouterSecret ? {
           OPENROUTER_API_KEY: ecs.Secret.fromSecretsManager(openRouterSecret, "OPENROUTER_API_KEY"),
         } : {}),

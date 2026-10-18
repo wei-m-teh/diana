@@ -50,3 +50,38 @@ def test_endpoints_have_distinct_bounded_instructions():
         assert "honesty" in prompt
         assert "safety" in prompt
         assert "privacy" in prompt
+
+
+@pytest.mark.parametrize("trait", TRAITS)
+def test_five_levels_have_distinct_behavior_and_examples(trait):
+    prompts = [
+        personality_instructions({**TRAITS, trait: value})
+        for value in (0, 25, 50, 75, 100)
+    ]
+    trait_lines = [
+        next(
+            line
+            for line in prompt.splitlines()
+            if line.startswith(trait.capitalize() + " (")
+        )
+        for prompt in prompts
+    ]
+    descriptions = [line.split(": ", 1)[1] for line in trait_lines]
+    assert len(set(descriptions)) == 5
+    for prompt in prompts:
+        if "(50/100): balanced expression" not in next(
+            line
+            for line in prompt.splitlines()
+            if line.startswith(trait.capitalize() + " (")
+        ):
+            assert "Illustrative contrast" in prompt
+            assert "Do not copy" in prompt
+        assert "No questions" in prompt
+        assert "0–20" in prompt  # noqa: RUF001
+
+
+def test_default_remains_balanced_and_traits_do_not_remove_boundaries():
+    prompt = personality_instructions(TRAITS)
+    assert prompt.count("/100): balanced expression") == 5
+    assert "accuracy" in prompt and "privacy" in prompt
+    assert "not length" in prompt

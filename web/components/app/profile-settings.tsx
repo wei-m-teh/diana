@@ -294,7 +294,7 @@ export function ProfileSettings({ onClose }: { onClose: () => void }) {
                         step={1}
                         value={personality[key]}
                         aria-describedby={`personality-${key}-ends`}
-                        aria-valuetext={`${personality[key]} out of 100: ${personality[key] < 34 ? low : personality[key] < 67 ? 'Balanced' : high}`}
+                        aria-valuetext={`${personality[key]} out of 100: ${personality[key] <= 20 ? `Strongly ${low.toLowerCase()}` : personality[key] <= 40 ? low : personality[key] <= 60 ? 'Balanced' : personality[key] <= 80 ? high : `Strongly ${high.toLowerCase()}`}`}
                         className="h-8 w-full cursor-pointer accent-blue-600"
                         onChange={(event) => {
                           setPersonality({ ...personality, [key]: Number(event.target.value) });

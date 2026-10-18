@@ -51,8 +51,9 @@ trainer misunderstanding just so she can repair it later.
 
 Each case has fixed, irrelevant Tokyo location and 1 a.m. local-time context to
 expose unsolicited context mentions. User-introduced rain, "tonight," or time
-references remain relevant. Default personality is tested; slider extremes and
-other languages are a future matrix, not covered by these results.
+references remain relevant. This suite tests default personality. Slider-specific
+comparisons are saved separately in `../personality/`; they do not cover other
+languages or replace this broader conversational-quality suite.
 
 ## Scoring and validation
 

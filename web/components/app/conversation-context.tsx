@@ -26,10 +26,11 @@ export function ConversationContext({ children }: { children: ReactNode }) {
       try {
         const parsed = parseSearchSources(JSON.parse(new TextDecoder().decode(data)));
         if (parsed)
-          setSources((previous) => [
-            ...previous.filter((x) => x.id !== parsed.id).slice(-9),
-            parsed,
-          ]);
+          setSources((previous) => {
+            if (previous.some((x) => x.id === parsed.id))
+              return previous.map((x) => (x.id === parsed.id ? parsed : x));
+            return [...previous.slice(-9), parsed];
+          });
       } catch {
         /* Ignore malformed source messages. */
       }
@@ -71,28 +72,4 @@ export function ConversationContext({ children }: { children: ReactNode }) {
   return <SourcesContext.Provider value={sources}>{children}</SourcesContext.Provider>;
 }
 
-export function SearchSourceCards() {
-  const results = useContext(SourcesContext);
-  return results.map((result) => (
-    <details key={result.id} className="rounded-lg border p-3 text-sm">
-      <summary>Sources: {result.query}</summary>
-      <ul className="mt-2 space-y-2">
-        {result.sources.map((source) => (
-          <li key={source.url}>
-            <a
-              className="text-blue-500 underline"
-              href={source.url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {source.title}
-            </a>
-          </li>
-        ))}
-      </ul>
-      <p className="text-muted-foreground mt-2 text-xs">
-        Checked {new Date(result.retrievedAt).toLocaleString()}
-      </p>
-    </details>
-  ));
-}
+export const useSearchSources = () => useContext(SourcesContext);

@@ -90,3 +90,41 @@ The synthetic streaming TTS check also failed to connect, so spoken pause qualit
 has not been verified. Rerun `test_speech_rhythm_is_contextual`,
 `test_does_not_repeat_recent_hesitation`, and the agent behavior suite after quota
 is restored. The change does not provision more credits or change providers.
+
+
+## Behavioral controls (October 2026)
+
+The agent uses five anchored ranges: 0-20, 21-40, 41-60, 61-80 and 81-100.
+The exact value is also supplied as an intensity cue; differences between adjacent
+numbers are not guaranteed. Concrete behavioral instructions and examples for
+non-neutral traits govern imagination, organization, initiative, disagreement,
+and emotional sensitivity. Active preferences take precedence over general style
+defaults, while accuracy, privacy, respect and explicit user boundaries remain
+fixed. Trait intensity does not automatically increase response length or change
+the TTS voice. Saved settings still apply to the next web conversation; Android
+personality dispatch and live updates are not part of this change.
+
+Regression cases, a prompt snapshot utility and the opt-in blinded evaluation are
+in `agent/tests/personality/`. Compare low, middle and high settings one trait at
+a time using repeated rolling conversations. See that folder's README for the
+criteria and limitations; do not infer effectiveness from unit tests alone.
+
+## Shared character file (October 16, 2026)
+
+The canonical character is `agent/SOUL.md`; root `SOUL.md` is a symlink to the
+same file. Keeping it inside the agent Docker context ensures changes are included
+in the CDK image asset. `src/soul.py` loads it relative to its module for each new
+session; missing or empty content fails explicitly.
+
+The shared file replaces hard-coded identity, conversation-priority and stylistic
+example sections. Operational voice/tool/grounding instructions remain separate.
+Saved slider instructions follow the character and adjust its defaults. Both web
+and Android use the shared character; this does not add Android slider dispatch.
+Existing calls retain their instructions. End and start a new conversation after
+deployment. Editing this file requires redeploying the agent to affect production.
+
+Validation: 40 soul/personality/context tests passed. A three-prompt model smoke
+check confirmed responses, but found emotional overstatement in the cake example
+and a rhetorical question despite a no-questions request. This is a trial release,
+not a claim of behavioral conformance. Raw local samples are saved under ignored
+`agent/eval-results/soul-20261016-smoke.json`; no full judged suite was rerun.

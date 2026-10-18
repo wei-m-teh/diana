@@ -10,7 +10,6 @@ import {
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation';
 import { Message, MessageContent, MessageResponse } from '@/components/ai-elements/message';
-import { SearchSourceCards } from '@/components/app/conversation-context';
 
 /**
  * Props for the AgentChatTranscript component.
@@ -70,7 +69,6 @@ export function AgentChatTranscript({
             </Message>
           );
         })}
-        <SearchSourceCards />
         <AnimatePresence>
           {agentState === 'thinking' && <AgentChatIndicator size="sm" />}
         </AnimatePresence>

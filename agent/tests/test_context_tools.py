@@ -82,7 +82,9 @@ async def test_search_requires_real_citations_and_limits_request():
     assert len(result["sources"]) == 1
     assert result["sources"][0]["url"] == "https://example.org/news"
     options = requests[0]["tools"][0]["parameters"]
-    assert options["max_uses"] == 1 and options["max_total_results"] == 3
+    assert options["max_uses"] == 3 and options["max_total_results"] == 6
+    assert options["max_results"] == 3
+    assert "per-lookup" in result["guidance"]
     assert "test-key" not in json.dumps(result)
 
 
@@ -131,7 +133,7 @@ def test_agent_clock_is_fresh_and_does_not_pollute_history():
     assert len(context.items) == 1
 
 
-async def test_search_sources_are_published_without_raw_excerpts():
+async def test_search_sources_publish_display_excerpt_without_raw_field():
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, Mock, patch
 
@@ -161,7 +163,8 @@ async def test_search_sources_are_published_without_raw_excerpts():
             == result
         )
     assert publish.await_count == 1
-    assert "Untrusted content" not in json.dumps(publish.call_args.args[0])
+    assert publish.call_args.args[0]["sources"][0]["description"] == "Untrusted content"
+    assert "excerpt" not in publish.call_args.args[0]["sources"][0]
 
 
 async def test_search_acknowledges_before_slow_lookup_finishes():
@@ -337,3 +340,95 @@ async def test_streamed_search_preamble_prevents_second_announcement(preamble):
         "Let me check the weather.", allow_interruptions=True
     )
     assert search.search.await_count == 3
+
+
+def test_source_preview_is_bounded_plain_text_with_public_image_only():
+    from web_search import source_preview
+
+    result = source_preview(
+        {
+            "excerpt": "<b>Source summary</b> " + "x" * 1000,
+            "image_url": "https://images.example.org/product.jpg",
+        }
+    )
+    assert len(result["description"]) <= 240
+    assert "<b>" not in result["description"]
+    assert result["imageUrl"] == "https://images.example.org/product.jpg"
+    assert "imageUrl" not in source_preview({"image_url": "https://127.0.0.1/private"})
+
+
+async def test_image_failure_shows_web_links_without_duplicate_acknowledgment():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock, patch
+
+    from agent import Diana
+
+    search = AsyncMock()
+    search.search.return_value = {
+        "status": "ok",
+        "summary": "Sources",
+        "retrieved_at": "2026-10-10T12:00:00Z",
+        "sources": [{"title": "Camera", "url": "https://example.org/camera"}],
+    }
+    media = AsyncMock()
+    media.find.return_value = {"error": "Media search is unavailable."}
+    publish = AsyncMock()
+    context = SimpleNamespace(session=Mock(), speech_handle=object())
+    with patch("agent.create_llm", return_value=None):
+        diana = Diana(search=search, media=media, publish_sources=publish)
+        result = await diana.find_media(
+            "image", "camera", context, "Let me find a picture."
+        )
+    assert result["status"] == "ok"
+    assert "load separately" in result["display_note"]
+    publish.assert_awaited_once()
+    assert (
+        publish.call_args.args[0]["sources"][0]["url"] == "https://example.org/camera"
+    )
+    context.session.say.assert_called_once()
+
+
+async def test_search_preserves_six_sources_and_reports_safe_failure(caplog):
+    annotations = [
+        {
+            "type": "url_citation",
+            "url_citation": {"url": f"https://example.org/{i}", "title": str(i)},
+        }
+        for i in range(8)
+    ]
+    search = WebSearch(
+        "private-key",
+        "model",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Verified subset",
+                                "annotations": annotations,
+                            }
+                        }
+                    ]
+                },
+            )
+        ),
+    )
+    result = await search.search("compare", "2026-10-10")
+    assert len(result["sources"]) == 6
+    assert "account" in result["guidance"]
+    search = WebSearch(
+        "private-key",
+        "model",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(429, json={"error": "sensitive-body"})
+        ),
+    )
+    result = await search.search("private-query", "2026-10-10")
+    assert result["status"] == "unavailable"
+    assert "429" in caplog.text
+    assert all(
+        value not in caplog.text
+        for value in ("private-query", "private-key", "sensitive-body")
+    )

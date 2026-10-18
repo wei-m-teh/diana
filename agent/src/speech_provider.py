@@ -10,6 +10,8 @@ from livekit.agents import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions, infer
 from livekit.plugins import openai
 from livekit.plugins.openai.tts import AudioChunkedStream
 
+from connection_warmup import OpenRouterWarmupMixin
+from elevenlabs_tts import ElevenLabsTTS
 from voices import Voice
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
@@ -29,7 +31,25 @@ def _key() -> str:
     return key
 
 
-class OpenRouterTTS(openai.TTS):
+def tts_provider() -> str:
+    provider = os.getenv("DIANA_TTS_PROVIDER", "").strip().lower() or speech_provider()
+    if provider not in {"livekit", "openrouter", "elevenlabs"}:
+        raise ValueError("DIANA_TTS_PROVIDER must be livekit, openrouter or elevenlabs")
+    return provider
+
+
+def _required(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise ValueError(f"{name} is required")
+    return value
+
+
+class WarmOpenRouterSTT(OpenRouterWarmupMixin, openai.STT):
+    pass
+
+
+class OpenRouterTTS(OpenRouterWarmupMixin, openai.TTS):
     def synthesize(
         self,
         text: str,
@@ -44,7 +64,7 @@ def create_stt():
         return inference.STT(model="deepgram/nova-3", language="multi")
     # AgentSession wraps non-streaming STT with its existing Silero VAD, so each
     # completed speech segment becomes a transcription request. No gateway used.
-    return openai.STT(
+    return WarmOpenRouterSTT(
         model="deepgram/nova-3",
         language="multi",
         use_realtime=False,
@@ -54,8 +74,32 @@ def create_stt():
 
 
 def create_tts(voice: Voice):
-    provider = speech_provider()
-    if provider == "livekit" or voice.model != "deepgram/aura-2":
+    provider = tts_provider()
+    if provider == "elevenlabs":
+        return ElevenLabsTTS(
+            api_key=_required("ELEVENLABS_API_KEY"),
+            voice_id=_required("ELEVENLABS_VOICE_ID"),
+            model=os.getenv("ELEVENLABS_TTS_MODEL", "").strip() or "eleven_v4",
+        )
+    if provider == "livekit":
+        return inference.TTS(model=voice.model, voice=voice.voice)
+    model = os.getenv("OPENROUTER_TTS_MODEL", "").strip()
+    voice_id = os.getenv("OPENROUTER_TTS_VOICE", "").strip()
+    if bool(model) != bool(voice_id):
+        raise ValueError("Set both OPENROUTER_TTS_MODEL and OPENROUTER_TTS_VOICE")
+    if model:
+        return OpenRouterTTS(
+            model=model,
+            voice=voice_id,
+            base_url=OPENROUTER_URL,
+            api_key=_key(),
+            response_format="mp3",
+        )
+    if voice.model != "deepgram/aura-2":
+        if os.getenv("DIANA_TTS_PROVIDER", "").strip():
+            raise ValueError(
+                "This voice requires an explicit OpenRouter TTS model/voice override"
+            )
         # Premium ElevenLabs/Cartesia voices retain their existing provider;
         # this migration only covers the verified Deepgram voice catalog.
         return inference.TTS(model=voice.model, voice=voice.voice)
